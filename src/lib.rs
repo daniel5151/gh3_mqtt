@@ -151,6 +151,9 @@ fn worker_main() {
     let mut last_periodic_publish = Instant::now();
     let mut discovery_sent = false;
 
+    // SAFETY: Running inside the Guitar Hero III process where game engine memory is valid.
+    let mem = unsafe { gh3::MemoryView::new() };
+
     while RUNNING.load(Ordering::SeqCst) {
         if !client.is_connected() {
             if config.debug_log {
@@ -185,7 +188,7 @@ fn worker_main() {
                     }
 
                     // Immediately publish initial values for all entities
-                    let initial_state = unsafe { gh3::read_game_state() };
+                    let initial_state = gh3::read_game_state(&mem);
                     publish_all_entities(&mut client, &config, &initial_state);
                     last_state = initial_state;
                 }
@@ -200,7 +203,7 @@ fn worker_main() {
         }
 
         // Read current game state safely
-        let current_state = unsafe { gh3::read_game_state() };
+        let current_state = gh3::read_game_state(&mem);
 
         // 1. Song Playing State Change
         if current_state.is_playing != last_state.is_playing {
@@ -407,6 +410,7 @@ pub unsafe extern "system" fn DllMain(
 ) -> i32 {
     match reason {
         DLL_PROCESS_ATTACH => {
+            // SAFETY: Safe to disable thread attach/detach calls as this DLL does not track thread state.
             let _ = unsafe { DisableThreadLibraryCalls(hinst) };
             RUNNING.store(true, Ordering::SeqCst);
             thread::spawn(worker_main);

@@ -10,3 +10,4 @@ crate-type = ["cdylib"]
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 windows = { version = "0.58", features = ["Win32_System_SystemServices", "Win32_System_LibraryLoader", "Win32_System_Memory", "Win32_Foundation"] }
+zerocopy = { version = "0.8.62", features = ["derive"] }

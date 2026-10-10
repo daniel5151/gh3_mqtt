@@ -4,6 +4,7 @@ use windows::Win32::System::Memory::{
     VirtualQuery, MEMORY_BASIC_INFORMATION, MEM_COMMIT, PAGE_EXECUTE_READ,
     PAGE_EXECUTE_READWRITE, PAGE_READONLY, PAGE_READWRITE,
 };
+use zerocopy::{FromBytes, Immutable, IntoBytes, KnownLayout};
 
 pub const ADDR_IS_PLAYING_SONG: usize = 0x00B4EB21;
 pub const ADDR_SONG_PAUSED: usize = 0x00B4E320;
@@ -34,7 +35,8 @@ pub const KEY_TITLE: u32 = 0xD4C98794;
 pub const KEY_ARTIST: u32 = 0xFEA66978;
 pub const KEY_AUTHOR: u32 = 0x42502737;
 
-#[repr(C, packed(4))]
+#[repr(C)]
+#[derive(FromBytes, IntoBytes, KnownLayout, Immutable, Clone, Copy, Debug, PartialEq)]
 pub struct HashMapNode {
     pub byte0: u8,
     pub byte1: u8,
@@ -43,45 +45,65 @@ pub struct HashMapNode {
     pub key: u32,
     pub dword8: u32,
     pub value: u32,
-    pub next_item: *const HashMapNode,
+    pub next_item: u32,
 }
 
-#[repr(C, packed(2))]
+#[repr(C)]
+#[derive(FromBytes, IntoBytes, KnownLayout, Immutable, Clone, Copy, Debug, PartialEq)]
 pub struct QbStruct {
     pub unk0: u16,
     pub unk2: u8,
     pub unk3: u8,
-    pub first: *const QbStructItem,
+    pub first: u32,
 }
 
-#[repr(C, packed(1))]
+#[repr(C)]
+#[derive(FromBytes, IntoBytes, KnownLayout, Immutable, Clone, Copy, Debug, PartialEq)]
 pub struct QbStructItem {
     pub unk_flag0: u8,
     pub flags: u8,
     pub word2: u16,
     pub key: u32,
     pub value: u32,
-    pub next: *const QbStructItem,
+    pub next: u32,
 }
 
-#[repr(C, packed(4))]
-pub struct QbMapNode {
-    pub key: u32,
-    pub value: u32,
-    pub next_node: *const QbMapNode,
+impl QbStructItem {
+    #[inline]
+    pub fn item_type(&self) -> u8 {
+        self.flags >> 1
+    }
 }
 
 #[repr(C)]
+#[derive(FromBytes, IntoBytes, KnownLayout, Immutable, Clone, Copy, Debug, PartialEq)]
+pub struct QbMapNode {
+    pub key: u32,
+    pub value: u32,
+    pub next_node: u32,
+}
+
+#[repr(C)]
+#[derive(FromBytes, IntoBytes, KnownLayout, Immutable, Clone, Copy, Debug, PartialEq)]
 pub struct QbMap {
     pub size: u32,
-    pub nodes: *const QbMapNode,
+    pub nodes: u32,
     pub type_flags: u8,
+    pub _pad: [u8; 3],
     pub unk_c: u32,
     pub unk_10: u32,
     pub unk_14: u8,
     pub bool_flag: u8,
     pub keep_alive: u8,
     pub unk_17: u8,
+}
+
+impl QbMap {
+    #[allow(dead_code)]
+    #[inline]
+    pub fn item_type(&self) -> u8 {
+        self.type_flags >> 1
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -152,45 +174,13 @@ fn crc32_byte(b: u8, crc: u32) -> u32 {
     c ^ (crc >> 8)
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_qb_hashes() {
-        assert_eq!(qb_hash("player1_status"), KEY_PLAYER1_STATUS);
-        assert_eq!(qb_hash("star_power_used"), KEY_STAR_POWER_USED);
-        assert_eq!(qb_hash("star_power_amount"), KEY_STAR_POWER_AMOUNT);
-        assert_eq!(qb_hash("star_power_usable"), KEY_STAR_POWER_USABLE);
-        assert_eq!(qb_hash("current_run"), KEY_CURRENT_RUN);
-        assert_eq!(qb_hash("current_health"), KEY_CURRENT_HEALTH);
-        assert_eq!(qb_hash("score"), KEY_SCORE);
-        assert_eq!(qb_hash("num_multiplier"), KEY_NUM_MULTIPLIER);
-        assert_eq!(qb_hash("total_notes"), KEY_TOTAL_NOTES);
-        assert_eq!(qb_hash("notes_hit"), KEY_NOTES_HIT);
-        assert_eq!(qb_hash("current_difficulty"), KEY_CURRENT_DIFFICULTY);
-        assert_eq!(qb_hash("current_song"), KEY_CURRENT_SONG);
-        assert_eq!(qb_hash("fastgh3_meta"), KEY_FASTGH3_META);
-        assert_eq!(qb_hash("gh3_songlist_props"), KEY_GH3_SONGLIST_PROPS);
-        assert_eq!(qb_hash("permanent_songlist_props"), KEY_PERMANENT_SONGLIST_PROPS);
-        assert_eq!(qb_hash("title"), KEY_TITLE);
-        assert_eq!(qb_hash("artist"), KEY_ARTIST);
-        assert_eq!(qb_hash("author"), KEY_AUTHOR);
-    }
-
-    #[test]
-    fn test_known_songs() {
-        assert_eq!(known_song_name(0xFC3DB2E8), Some("Slow Ride - Foghat"));
-        assert_eq!(known_song_name(0x8CF2B87A), Some("Cherub Rock - The Smashing Pumpkins"));
-        assert_eq!(known_song_name(0x8593790E), Some("One - Metallica"));
-        assert_eq!(known_song_name(0x40797ADD), Some("Through the Fire and Flames - DragonForce"));
-        assert_eq!(known_song_name(0xB3AE1B7A), Some("Bulls on Parade - Rage Against the Machine"));
-    }
-}
-
 pub unsafe fn is_readable(ptr: *const c_void, size: usize) -> bool {
     let addr = ptr as usize;
-    if addr < 0x00010000 || addr > 0x7FFF0000 {
+    #[cfg(target_pointer_width = "32")]
+    let is_user_addr = addr >= 0x00010000 && addr <= 0x7FFF0000;
+    #[cfg(not(target_pointer_width = "32"))]
+    let is_user_addr = addr >= 0x00010000 && addr <= 0x7FFF_FFFF_FFFF;
+    if !is_user_addr {
         return false;
     }
     let mut mbi = MEMORY_BASIC_INFORMATION::default();
@@ -210,91 +200,156 @@ pub unsafe fn is_readable(ptr: *const c_void, size: usize) -> bool {
     (protect.0 & allowed.0) != 0 && (addr + size <= mbi.BaseAddress as usize + mbi.RegionSize)
 }
 
+pub unsafe fn readable_len(ptr: *const c_void, max_len: usize) -> usize {
+    let addr = ptr as usize;
+    #[cfg(target_pointer_width = "32")]
+    let is_user_addr = addr >= 0x00010000 && addr <= 0x7FFF0000;
+    #[cfg(not(target_pointer_width = "32"))]
+    let is_user_addr = addr >= 0x00010000 && addr <= 0x7FFF_FFFF_FFFF;
+    if !is_user_addr {
+        return 0;
+    }
+    let mut mbi = MEMORY_BASIC_INFORMATION::default();
+    let res = VirtualQuery(
+        Some(ptr),
+        &mut mbi,
+        std::mem::size_of::<MEMORY_BASIC_INFORMATION>(),
+    );
+    if res == 0 || mbi.State != MEM_COMMIT {
+        return 0;
+    }
+    let protect = mbi.Protect;
+    let allowed = PAGE_READONLY | PAGE_READWRITE | PAGE_EXECUTE_READ | PAGE_EXECUTE_READWRITE;
+    if (protect.0 & allowed.0) == 0 {
+        return 0;
+    }
+    let page_end = mbi.BaseAddress as usize + mbi.RegionSize;
+    if addr >= page_end {
+        return 0;
+    }
+    (page_end - addr).min(max_len)
+}
+
+/// Safely read a value of type `T` from `addr` using zerocopy after validating memory readability.
+pub unsafe fn read_val<T: FromBytes>(addr: usize) -> Option<T> {
+    let size = std::mem::size_of::<T>();
+    if !is_readable(addr as *const c_void, size) {
+        return None;
+    }
+    let slice = std::slice::from_raw_parts(addr as *const u8, size);
+    T::read_from_bytes(slice).ok()
+}
+
+/// Safely read a zero-copy reference to `T` from `addr` using zerocopy if readable and aligned.
+pub unsafe fn read_ref<'a, T: FromBytes + KnownLayout + Immutable>(
+    addr: usize,
+) -> Option<&'a T> {
+    let size = std::mem::size_of::<T>();
+    if !is_readable(addr as *const c_void, size) {
+        return None;
+    }
+    let slice = std::slice::from_raw_parts(addr as *const u8, size);
+    T::ref_from_bytes(slice).ok()
+}
+
+/// Safely read a zero-copy slice of `T` from `addr` using zerocopy if readable and aligned.
+pub unsafe fn read_slice<'a, T: FromBytes + KnownLayout + Immutable>(
+    addr: usize,
+    count: usize,
+) -> Option<&'a [T]> {
+    let size = std::mem::size_of::<T>() * count;
+    if !is_readable(addr as *const c_void, size) {
+        return None;
+    }
+    let slice = std::slice::from_raw_parts(addr as *const u8, size);
+    <[T]>::ref_from_bytes(slice).ok()
+}
+
 pub unsafe fn read_game_state() -> GameState {
     let mut state = GameState::default();
 
     // 1. Check if game is currently playing a song
-    if is_readable(ADDR_IS_PLAYING_SONG as *const c_void, 1) {
-        state.is_playing = *(ADDR_IS_PLAYING_SONG as *const u8) != 0;
+    if let Some(val) = read_val::<u8>(ADDR_IS_PLAYING_SONG) {
+        state.is_playing = val != 0;
     }
 
     // 2. Check if song is paused (only valid while playing)
-    if state.is_playing && is_readable(ADDR_SONG_PAUSED as *const c_void, 1) {
-        state.is_paused = *(ADDR_SONG_PAUSED as *const u8) != 0;
+    if state.is_playing {
+        if let Some(val) = read_val::<u8>(ADDR_SONG_PAUSED) {
+            state.is_paused = val != 0;
+        }
     }
 
     // 3. Locate GlobalMap table
-    let mut map_table: *const *const HashMapNode = std::ptr::null();
-    if is_readable(ADDR_ITEM_MAP as *const c_void, 4) {
-        let tbl = *(ADDR_ITEM_MAP as *const *const *const HashMapNode);
-        if !tbl.is_null() && is_readable(tbl as *const c_void, 0x8000 * 4) {
-            map_table = tbl;
+    let mut map_table_addr: usize = 0;
+    if let Some(tbl) = read_val::<u32>(ADDR_ITEM_MAP) {
+        let tbl_addr = tbl as usize;
+        if read_slice::<u32>(tbl_addr, 0x8000).is_some() {
+            map_table_addr = tbl_addr;
         }
     }
 
     // 4. Read current difficulty if GlobalMap is valid
-    if !map_table.is_null() {
-        let diff_node = find_global_node(map_table, KEY_CURRENT_DIFFICULTY);
-        if !diff_node.is_null() && is_readable(diff_node as *const c_void, std::mem::size_of::<HashMapNode>()) {
-            state.difficulty = resolve_difficulty((*diff_node).value).to_string();
+    if map_table_addr != 0 {
+        if let Some(diff_node) = find_global_node(map_table_addr, KEY_CURRENT_DIFFICULTY) {
+            state.difficulty = resolve_difficulty(diff_node.value).to_string();
         }
     }
 
     // 5. Read song info if playing
     if state.is_playing {
-        state.current_song = read_song_info(map_table).unwrap_or_else(|| "Playing".to_string());
+        state.current_song = read_song_info(map_table_addr).unwrap_or_else(|| "Playing".to_string());
     } else {
         state.current_song = "Idle".to_string();
     }
 
-    // 4. Locate player1_status struct pointer
-    let mut p1_struct_ptr: *const QbStruct = std::ptr::null();
+    // 6. Locate player1_status struct address
+    let mut p1_struct_addr: usize = 0;
 
     // Try ADDR_P1_STATUS_PTR (0x00A12FCC) first
-    if is_readable(ADDR_P1_STATUS_PTR as *const c_void, 4) {
-        let direct_ptr = *(ADDR_P1_STATUS_PTR as *const *const QbStruct);
-        if !direct_ptr.is_null() && is_readable(direct_ptr as *const c_void, std::mem::size_of::<QbStruct>()) {
-            p1_struct_ptr = direct_ptr;
+    if let Some(direct_ptr) = read_val::<u32>(ADDR_P1_STATUS_PTR) {
+        let direct_addr = direct_ptr as usize;
+        if direct_addr != 0 && read_val::<QbStruct>(direct_addr).is_some() {
+            p1_struct_addr = direct_addr;
         }
     }
 
     // Fall back to GlobalMap lookup
-    if p1_struct_ptr.is_null() && !map_table.is_null() {
-        let node = find_global_node(map_table, KEY_PLAYER1_STATUS);
-        if !node.is_null() && is_readable(node as *const c_void, std::mem::size_of::<HashMapNode>()) {
-            let ptr = (*node).value as *const QbStruct;
-            if !ptr.is_null() && is_readable(ptr as *const c_void, std::mem::size_of::<QbStruct>()) {
-                p1_struct_ptr = ptr;
+    if p1_struct_addr == 0 && map_table_addr != 0 {
+        if let Some(node) = find_global_node(map_table_addr, KEY_PLAYER1_STATUS) {
+            let ptr_addr = node.value as usize;
+            if ptr_addr != 0 && read_val::<QbStruct>(ptr_addr).is_some() {
+                p1_struct_addr = ptr_addr;
             }
         }
     }
 
-    if p1_struct_ptr.is_null() {
+    if p1_struct_addr == 0 {
         return state;
     }
 
-    // 5. Extract player1_status fields
-    if let Some(item) = find_struct_item(p1_struct_ptr, KEY_STAR_POWER_USED) {
-        state.star_power_active = (*item).value != 0;
+    // 7. Extract player1_status fields
+    if let Some(item) = find_struct_item(p1_struct_addr, KEY_STAR_POWER_USED) {
+        state.star_power_active = item.value != 0;
     }
 
-    if let Some(item) = find_struct_item(p1_struct_ptr, KEY_STAR_POWER_AMOUNT) {
-        let type_val = (*item).flags >> 1;
+    if let Some(item) = find_struct_item(p1_struct_addr, KEY_STAR_POWER_AMOUNT) {
+        let type_val = item.item_type();
         state.star_power_gauge = if type_val == 2 {
-            f32::from_bits((*item).value).clamp(0.0, 100.0)
+            f32::from_bits(item.value).clamp(0.0, 100.0)
         } else if type_val == 1 {
-            ((*item).value as f32).clamp(0.0, 100.0)
+            (item.value as f32).clamp(0.0, 100.0)
         } else {
             0.0
         };
     }
 
-    if let Some(item) = find_struct_item(p1_struct_ptr, KEY_STAR_POWER_USABLE) {
-        state.star_power_usable = (*item).value != 0;
+    if let Some(item) = find_struct_item(p1_struct_addr, KEY_STAR_POWER_USABLE) {
+        state.star_power_usable = item.value != 0;
     }
 
-    if let Some(item) = find_struct_item(p1_struct_ptr, KEY_CURRENT_RUN) {
-        state.streak = (*item).value;
+    if let Some(item) = find_struct_item(p1_struct_addr, KEY_CURRENT_RUN) {
+        state.streak = item.value;
     }
 
     // Multiplier climbs 1x -> 2x -> 3x -> 4x with streak (0-9, 10-19, 20-29, 30+ notes)
@@ -312,45 +367,47 @@ pub unsafe fn read_game_state() -> GameState {
         base_mult
     };
 
-    if let Some(item) = find_struct_item(p1_struct_ptr, KEY_SCORE) {
-        let type_val = (*item).flags >> 1;
+    if let Some(item) = find_struct_item(p1_struct_addr, KEY_SCORE) {
+        let type_val = item.item_type();
         state.score = if type_val == 2 {
-            f32::from_bits((*item).value).max(0.0) as u32
+            f32::from_bits(item.value).max(0.0) as u32
         } else {
-            (*item).value
+            item.value
         };
     }
 
     // If score was not in p1_struct, check ADDR_SCORE_OBJECT
-    if state.score == 0 && is_readable(ADDR_SCORE_OBJECT as *const c_void, 4) {
-        let score_obj_ptr = *(ADDR_SCORE_OBJECT as *const *const QbStruct);
-        if !score_obj_ptr.is_null() && is_readable(score_obj_ptr as *const c_void, std::mem::size_of::<QbStruct>()) {
-            if let Some(item) = find_struct_item(score_obj_ptr, KEY_SCORE) {
-                let type_val = (*item).flags >> 1;
-                state.score = if type_val == 2 {
-                    f32::from_bits((*item).value).max(0.0) as u32
-                } else {
-                    (*item).value
-                };
+    if state.score == 0 {
+        if let Some(score_obj_ptr) = read_val::<u32>(ADDR_SCORE_OBJECT) {
+            let score_obj_addr = score_obj_ptr as usize;
+            if score_obj_addr != 0 && read_val::<QbStruct>(score_obj_addr).is_some() {
+                if let Some(item) = find_struct_item(score_obj_addr, KEY_SCORE) {
+                    let type_val = item.item_type();
+                    state.score = if type_val == 2 {
+                        f32::from_bits(item.value).max(0.0) as u32
+                    } else {
+                        item.value
+                    };
+                }
             }
         }
     }
 
-    if let Some(item) = find_struct_item(p1_struct_ptr, KEY_CURRENT_HEALTH) {
-        let type_val = (*item).flags >> 1;
+    if let Some(item) = find_struct_item(p1_struct_addr, KEY_CURRENT_HEALTH) {
+        let type_val = item.item_type();
         state.rock_meter = if type_val == 2 {
-            f32::from_bits((*item).value)
+            f32::from_bits(item.value)
         } else {
-            (*item).value as f32
+            item.value as f32
         };
     }
 
-    if let Some(item) = find_struct_item(p1_struct_ptr, KEY_NOTES_HIT) {
-        state.notes_hit = (*item).value;
+    if let Some(item) = find_struct_item(p1_struct_addr, KEY_NOTES_HIT) {
+        state.notes_hit = item.value;
     }
 
-    if let Some(item) = find_struct_item(p1_struct_ptr, KEY_TOTAL_NOTES) {
-        state.total_notes = (*item).value;
+    if let Some(item) = find_struct_item(p1_struct_addr, KEY_TOTAL_NOTES) {
+        state.total_notes = item.value;
     }
 
     state.notes_missed = state.total_notes.saturating_sub(state.notes_hit);
@@ -368,17 +425,16 @@ pub fn resolve_difficulty(diff_key: u32) -> &'static str {
     }
 }
 
-pub unsafe fn read_song_info(map_table: *const *const HashMapNode) -> Option<String> {
+pub unsafe fn read_song_info(map_table_addr: usize) -> Option<String> {
     // 1. Check fastgh3_meta struct (FastGH3 custom songs)
-    if !map_table.is_null() {
-        let meta_node = find_global_node(map_table, KEY_FASTGH3_META);
-        if !meta_node.is_null() && is_readable(meta_node as *const c_void, std::mem::size_of::<HashMapNode>()) {
-            let meta_struct = (*meta_node).value as *const QbStruct;
-            if !meta_struct.is_null() && is_readable(meta_struct as *const c_void, std::mem::size_of::<QbStruct>()) {
-                let title = find_struct_item(meta_struct, KEY_TITLE).and_then(|it| extract_string_from_item(it));
-                let author = find_struct_item(meta_struct, KEY_AUTHOR)
-                    .or_else(|| find_struct_item(meta_struct, KEY_ARTIST))
-                    .and_then(|it| extract_string_from_item(it));
+    if map_table_addr != 0 {
+        if let Some(meta_node) = find_global_node(map_table_addr, KEY_FASTGH3_META) {
+            let meta_struct_addr = meta_node.value as usize;
+            if meta_struct_addr != 0 && read_val::<QbStruct>(meta_struct_addr).is_some() {
+                let title = find_struct_item(meta_struct_addr, KEY_TITLE).and_then(|it| extract_string_from_item(&it));
+                let author = find_struct_item(meta_struct_addr, KEY_AUTHOR)
+                    .or_else(|| find_struct_item(meta_struct_addr, KEY_ARTIST))
+                    .and_then(|it| extract_string_from_item(&it));
                 if let Some(t) = title {
                     if !t.is_empty() {
                         return Some(if let Some(a) = author {
@@ -398,16 +454,17 @@ pub unsafe fn read_song_info(map_table: *const *const HashMapNode) -> Option<Str
 
     // 2. Read native active song QbKey
     let mut song_key: u32 = 0;
-    if is_readable(ADDR_CURRENT_SONG_KEY as *const c_void, 4) {
-        song_key = *(ADDR_CURRENT_SONG_KEY as *const u32);
+    if let Some(k) = read_val::<u32>(ADDR_CURRENT_SONG_KEY) {
+        song_key = k;
     }
-    if song_key == 0 && is_readable(ADDR_SONG_ as *const c_void, 4) {
-        song_key = *(ADDR_SONG_ as *const u32);
+    if song_key == 0 {
+        if let Some(k) = read_val::<u32>(ADDR_SONG_) {
+            song_key = k;
+        }
     }
-    if song_key == 0 && !map_table.is_null() {
-        let song_node = find_global_node(map_table, KEY_CURRENT_SONG);
-        if !song_node.is_null() && is_readable(song_node as *const c_void, std::mem::size_of::<HashMapNode>()) {
-            song_key = (*song_node).value;
+    if song_key == 0 && map_table_addr != 0 {
+        if let Some(song_node) = find_global_node(map_table_addr, KEY_CURRENT_SONG) {
+            song_key = song_node.value;
         }
     }
 
@@ -421,17 +478,16 @@ pub unsafe fn read_song_info(map_table: *const *const HashMapNode) -> Option<Str
     }
 
     // 4. Check gh3_songlist_props & permanent_songlist_props in GlobalMap
-    if !map_table.is_null() {
+    if map_table_addr != 0 {
         for &props_key in &[KEY_GH3_SONGLIST_PROPS, KEY_PERMANENT_SONGLIST_PROPS] {
-            let props_node = find_global_node(map_table, props_key);
-            if !props_node.is_null() && is_readable(props_node as *const c_void, std::mem::size_of::<HashMapNode>()) {
-                let props_struct = (*props_node).value as *const QbStruct;
-                if !props_struct.is_null() && is_readable(props_struct as *const c_void, std::mem::size_of::<QbStruct>()) {
-                    if let Some(song_item) = find_struct_item(props_struct, song_key) {
-                        let song_props = (*song_item).value as *const QbStruct;
-                        if !song_props.is_null() && is_readable(song_props as *const c_void, std::mem::size_of::<QbStruct>()) {
-                            let title = find_struct_item(song_props, KEY_TITLE).and_then(|it| extract_string_from_item(it));
-                            let artist = find_struct_item(song_props, KEY_ARTIST).and_then(|it| extract_string_from_item(it));
+            if let Some(props_node) = find_global_node(map_table_addr, props_key) {
+                let props_struct_addr = props_node.value as usize;
+                if props_struct_addr != 0 && read_val::<QbStruct>(props_struct_addr).is_some() {
+                    if let Some(song_item) = find_struct_item(props_struct_addr, song_key) {
+                        let song_props_addr = song_item.value as usize;
+                        if song_props_addr != 0 && read_val::<QbStruct>(song_props_addr).is_some() {
+                            let title = find_struct_item(song_props_addr, KEY_TITLE).and_then(|it| extract_string_from_item(&it));
+                            let artist = find_struct_item(song_props_addr, KEY_ARTIST).and_then(|it| extract_string_from_item(&it));
                             if let Some(t) = title {
                                 if !t.is_empty() {
                                     return Some(if let Some(a) = artist {
@@ -539,127 +595,204 @@ pub fn known_song_name(key: u32) -> Option<&'static str> {
     }
 }
 
-unsafe fn extract_string_from_item(item: *const QbStructItem) -> Option<String> {
-    if item.is_null() {
-        return None;
-    }
-    let type_val = (*item).flags >> 1;
-    let ptr = (*item).value as *const c_void;
-    if !is_readable(ptr, 2) {
+pub unsafe fn extract_string_from_item(item: &QbStructItem) -> Option<String> {
+    let type_val = item.item_type();
+    let addr = item.value as usize;
+    let len = readable_len(addr as *const c_void, 256);
+    if len == 0 {
         return None;
     }
     match type_val {
         3 => {
-            // CString
-            let cstr_ptr = ptr as *const u8;
-            let mut bytes = Vec::new();
-            let mut offset = 0;
-            while offset < 128 && is_readable(cstr_ptr.add(offset) as *const c_void, 1) {
-                let b = *cstr_ptr.add(offset);
-                if b == 0 {
-                    break;
-                }
-                bytes.push(b);
-                offset += 1;
+            // CString (1-byte characters)
+            let bytes = read_slice::<u8>(addr, len)?;
+            let nul_pos = bytes.iter().position(|&b| b == 0).unwrap_or(bytes.len());
+            if nul_pos == 0 {
+                return None;
             }
-            if !bytes.is_empty() {
-                Some(String::from_utf8_lossy(&bytes).trim().to_string())
-            } else {
-                None
-            }
+            Some(String::from_utf8_lossy(&bytes[..nul_pos]).trim().to_string())
         }
         4 => {
-            // WString (UTF-16)
-            let wstr_ptr = ptr as *const u16;
-            let mut chars = Vec::new();
-            let mut offset = 0;
-            while offset < 128 && is_readable(wstr_ptr.add(offset) as *const c_void, 2) {
-                let c = *wstr_ptr.add(offset);
-                if c == 0 {
-                    break;
-                }
-                chars.push(c);
-                offset += 1;
+            // WString (UTF-16, 2-byte characters)
+            let u16_len = len / 2;
+            if u16_len == 0 {
+                return None;
             }
-            if !chars.is_empty() {
-                Some(String::from_utf16_lossy(&chars).trim().to_string())
-            } else {
-                None
+            let words = read_slice::<u16>(addr, u16_len)?;
+            let nul_pos = words.iter().position(|&w| w == 0).unwrap_or(words.len());
+            if nul_pos == 0 {
+                return None;
             }
+            Some(String::from_utf16_lossy(&words[..nul_pos]).trim().to_string())
         }
         _ => None,
     }
 }
 
-unsafe fn find_global_node(table: *const *const HashMapNode, key: u32) -> *const HashMapNode {
+pub unsafe fn find_global_node(table_addr: usize, key: u32) -> Option<HashMapNode> {
+    let buckets = read_slice::<u32>(table_addr, 0x8000)?;
     let index = (key & 0x7FFF) as usize;
-    let mut curr = *table.add(index);
+    let mut curr_addr = buckets[index] as usize;
     let mut count = 0;
-    while !curr.is_null() && count < 256 {
-        if !is_readable(curr as *const c_void, std::mem::size_of::<HashMapNode>()) {
-            break;
+    while curr_addr != 0 && count < 256 {
+        let node = read_ref::<HashMapNode>(curr_addr)?;
+        if node.key == key {
+            return Some(*node);
         }
-        if (*curr).key == key {
-            return curr;
-        }
-        curr = (*curr).next_item;
+        curr_addr = node.next_item as usize;
         count += 1;
     }
-    std::ptr::null()
+    None
 }
 
-unsafe fn find_struct_item(st: *const QbStruct, key: u32) -> Option<*const QbStructItem> {
-    let mut item = (*st).first;
+pub unsafe fn find_struct_item(st_addr: usize, key: u32) -> Option<QbStructItem> {
+    let st = read_ref::<QbStruct>(st_addr)?;
+    let mut item_addr = st.first as usize;
     let mut count = 0;
-    while !item.is_null() && count < 300 {
-        if !is_readable(item as *const c_void, std::mem::size_of::<QbStructItem>()) {
-            break;
-        }
+    while item_addr != 0 && count < 300 {
+        let item = read_ref::<QbStructItem>(item_addr)?;
 
         // If this item is a QbMap, check the map table
-        let type_val = (*item).flags >> 1;
+        let type_val = item.item_type();
         if type_val == 0x1B {
-            let map_ptr = (*item).value as *const QbMap;
-            if !map_ptr.is_null() && is_readable(map_ptr as *const c_void, std::mem::size_of::<QbMap>()) {
-                if let Some(found_in_map) = find_map_item(map_ptr, key) {
+            let map_addr = item.value as usize;
+            if map_addr != 0 {
+                if let Some(found_in_map) = find_map_item(map_addr, key) {
                     return Some(found_in_map);
                 }
             }
         }
 
-        if (*item).key == key {
-            return Some(item);
+        if item.key == key {
+            return Some(*item);
         }
-        item = (*item).next;
+        item_addr = item.next as usize;
         count += 1;
     }
     None
 }
 
-unsafe fn find_map_item(map: *const QbMap, key: u32) -> Option<*const QbStructItem> {
-    if (*map).nodes.is_null() || (*map).size > 16 {
+pub unsafe fn find_map_item(map_addr: usize, key: u32) -> Option<QbStructItem> {
+    let map = read_ref::<QbMap>(map_addr)?;
+    if map.nodes == 0 || map.size > 16 {
         return None;
     }
-    let mask = (1 << (*map).size) - 1;
-    let index = (key & mask) as usize;
-    let table_ptr = (*map).nodes;
-    if !is_readable(table_ptr.add(index) as *const c_void, std::mem::size_of::<QbMapNode>()) {
-        return None;
-    }
-    let mut node: *const QbMapNode = table_ptr.add(index);
+    let len = 1 << map.size;
+    let nodes_slice = read_slice::<QbMapNode>(map.nodes as usize, len)?;
+    let mask = len - 1;
+    let index = (key as usize) & mask;
+    let mut node = nodes_slice[index];
     let mut count = 0;
-    while !node.is_null() && count < 64 {
-        if !is_readable(node as *const c_void, std::mem::size_of::<QbMapNode>()) {
-            break;
-        }
-        if (*node).key == key {
-            let item_ptr = (*node).value as *const QbStructItem;
-            if !item_ptr.is_null() && is_readable(item_ptr as *const c_void, std::mem::size_of::<QbStructItem>()) {
-                return Some(item_ptr);
+    loop {
+        if node.key == key {
+            let item_addr = node.value as usize;
+            if item_addr != 0 {
+                if let Some(item) = read_ref::<QbStructItem>(item_addr) {
+                    return Some(*item);
+                }
             }
         }
-        node = (*node).next_node;
-        count += 1;
+        if node.next_node == 0 || count >= 64 {
+            break;
+        }
+        if let Some(next) = read_ref::<QbMapNode>(node.next_node as usize) {
+            node = *next;
+            count += 1;
+        } else {
+            break;
+        }
     }
     None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_struct_sizes() {
+        assert_eq!(std::mem::size_of::<HashMapNode>(), 20);
+        assert_eq!(std::mem::size_of::<QbStruct>(), 8);
+        assert_eq!(std::mem::size_of::<QbStructItem>(), 16);
+        assert_eq!(std::mem::size_of::<QbMapNode>(), 12);
+        assert_eq!(std::mem::size_of::<QbMap>(), 24);
+    }
+
+    #[test]
+    fn test_zerocopy_struct_reading() {
+        let node_bytes = [
+            1u8, 2, 3, 4,
+            0x11, 0x22, 0x33, 0x44, // key: 0x44332211
+            0x55, 0x66, 0x77, 0x88, // dword8: 0x88776655
+            0x99, 0xAA, 0xBB, 0xCC, // value: 0xCCBBAA99
+            0xDD, 0xEE, 0xFF, 0x01, // next_item: 0x01FFEEDD
+        ];
+        let node = HashMapNode::read_from_bytes(&node_bytes).unwrap();
+        assert_eq!(node.byte0, 1);
+        assert_eq!(node.byte1, 2);
+        assert_eq!(node.item_type, 3);
+        assert_eq!(node.byte3, 4);
+        assert_eq!(node.key, 0x44332211);
+        assert_eq!(node.dword8, 0x88776655);
+        assert_eq!(node.value, 0xCCBBAA99);
+        assert_eq!(node.next_item, 0x01FFEEDD);
+
+        let struct_bytes = [
+            0x00, 0x00, // unk0: 0
+            0x01,       // unk2: 1
+            0x00,       // unk3: 0
+            0x10, 0x20, 0x30, 0x40, // first: 0x40302010
+        ];
+        let qb_struct = QbStruct::read_from_bytes(&struct_bytes).unwrap();
+        assert_eq!(qb_struct.unk0, 0);
+        assert_eq!(qb_struct.unk2, 1);
+        assert_eq!(qb_struct.unk3, 0);
+        assert_eq!(qb_struct.first, 0x40302010);
+
+        let item_bytes = [
+            0x00, // unk_flag0
+            0x04, // flags: (2 << 1) = float type
+            0x00, 0x00, // word2
+            0xDE, 0x08, 0xDB, 0x35, // key: KEY_STAR_POWER_AMOUNT (0x35DB08DE)
+            0x00, 0x00, 0xC8, 0x42, // value: float 100.0f (0x42C80000)
+            0x00, 0x00, 0x00, 0x00, // next: 0
+        ];
+        let item = QbStructItem::read_from_bytes(&item_bytes).unwrap();
+        assert_eq!(item.flags, 4);
+        assert_eq!(item.item_type(), 2);
+        assert_eq!(item.key, KEY_STAR_POWER_AMOUNT);
+        assert_eq!(f32::from_bits(item.value), 100.0);
+        assert_eq!(item.next, 0);
+    }
+
+    #[test]
+    fn test_qb_hashes() {
+        assert_eq!(qb_hash("player1_status"), KEY_PLAYER1_STATUS);
+        assert_eq!(qb_hash("star_power_used"), KEY_STAR_POWER_USED);
+        assert_eq!(qb_hash("star_power_amount"), KEY_STAR_POWER_AMOUNT);
+        assert_eq!(qb_hash("star_power_usable"), KEY_STAR_POWER_USABLE);
+        assert_eq!(qb_hash("current_run"), KEY_CURRENT_RUN);
+        assert_eq!(qb_hash("current_health"), KEY_CURRENT_HEALTH);
+        assert_eq!(qb_hash("score"), KEY_SCORE);
+        assert_eq!(qb_hash("num_multiplier"), KEY_NUM_MULTIPLIER);
+        assert_eq!(qb_hash("total_notes"), KEY_TOTAL_NOTES);
+        assert_eq!(qb_hash("notes_hit"), KEY_NOTES_HIT);
+        assert_eq!(qb_hash("current_difficulty"), KEY_CURRENT_DIFFICULTY);
+        assert_eq!(qb_hash("current_song"), KEY_CURRENT_SONG);
+        assert_eq!(qb_hash("fastgh3_meta"), KEY_FASTGH3_META);
+        assert_eq!(qb_hash("gh3_songlist_props"), KEY_GH3_SONGLIST_PROPS);
+        assert_eq!(qb_hash("permanent_songlist_props"), KEY_PERMANENT_SONGLIST_PROPS);
+        assert_eq!(qb_hash("title"), KEY_TITLE);
+        assert_eq!(qb_hash("artist"), KEY_ARTIST);
+        assert_eq!(qb_hash("author"), KEY_AUTHOR);
+    }
+
+    #[test]
+    fn test_known_songs() {
+        assert_eq!(known_song_name(0xFC3DB2E8), Some("Slow Ride - Foghat"));
+        assert_eq!(known_song_name(0x8CF2B87A), Some("Cherub Rock - The Smashing Pumpkins"));
+        assert_eq!(known_song_name(0x8593790E), Some("One - Metallica"));
+        assert_eq!(known_song_name(0x40797ADD), Some("Through the Fire and Flames - DragonForce"));
+        assert_eq!(known_song_name(0xB3AE1B7A), Some("Bulls on Parade - Rage Against the Machine"));
+    }
 }

@@ -1,6 +1,16 @@
 use std::io::{Read, Write};
 use std::net::{TcpStream, ToSocketAddrs};
 use std::time::{Duration, Instant};
+use zerocopy::{FromBytes, Immutable, IntoBytes, KnownLayout};
+
+#[repr(C)]
+#[derive(FromBytes, IntoBytes, KnownLayout, Immutable, Clone, Copy, Debug, PartialEq)]
+pub struct ConnackPacket {
+    pub packet_type: u8,
+    pub remaining_length: u8,
+    pub session_present: u8,
+    pub return_code: u8,
+}
 
 pub struct MqttClient {
     stream: Option<TcpStream>,
@@ -115,16 +125,19 @@ impl MqttClient {
             .map_err(|e| format!("Failed to send CONNECT: {}", e))?;
 
         // Read CONNACK response
-        let mut connack = [0u8; 4];
+        let mut connack_buf = [0u8; 4];
         stream
-            .read_exact(&mut connack)
+            .read_exact(&mut connack_buf)
             .map_err(|e| format!("Failed to read CONNACK: {}", e))?;
 
-        if connack[0] != 0x20 || connack[1] != 0x02 {
+        let connack = ConnackPacket::read_from_bytes(&connack_buf)
+            .map_err(|e| format!("Failed to parse CONNACK: {}", e))?;
+
+        if connack.packet_type != 0x20 || connack.remaining_length != 0x02 {
             return Err(format!("Invalid CONNACK response: {:?}", connack));
         }
-        if connack[3] != 0x00 {
-            return Err(format!("Broker rejected connection with return code: {}", connack[3]));
+        if connack.return_code != 0x00 {
+            return Err(format!("Broker rejected connection with return code: {}", connack.return_code));
         }
 
         self.stream = Some(stream);
@@ -219,4 +232,19 @@ fn encode_str(s: &str, out: &mut Vec<u8>) {
     let len = s.len() as u16;
     out.extend_from_slice(&len.to_be_bytes());
     out.extend_from_slice(s.as_bytes());
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_connack_packet_zerocopy() {
+        let raw = [0x20, 0x02, 0x00, 0x00];
+        let packet = ConnackPacket::read_from_bytes(&raw).unwrap();
+        assert_eq!(packet.packet_type, 0x20);
+        assert_eq!(packet.remaining_length, 0x02);
+        assert_eq!(packet.session_present, 0x00);
+        assert_eq!(packet.return_code, 0x00);
+    }
 }

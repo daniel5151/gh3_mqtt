@@ -50,8 +50,8 @@ host = 192.168.1.100
 port = 1883
 
 # Optional MQTT broker credentials (leave blank if not needed)
-username = 
-password = 
+username =
+password =
 
 # Base topic prefix (default: gh3)
 topic_prefix = gh3
@@ -77,62 +77,69 @@ debug_log = true
 Once connected, Home Assistant automatically discovers `binary_sensor.gh3_star_power`. Here is an example automation to flash your lights when Star Power is activated and restore them when depleted:
 
 ```yaml
-alias: "GH3 - Flash Lights on Star Power"
-description: "Flashes room lights when Star Power is active in Guitar Hero III"
-trigger:
-  - platform: state
-    entity_id: binary_sensor.gh3_star_power
-    to: "on"
-    id: activated
-  - platform: state
-    entity_id: binary_sensor.gh3_star_power
-    to: "off"
-    id: deactivated
-action:
-  - choose:
-      - conditions:
-          - condition: trigger
-            id: activated
-        sequence:
-          # Save previous light state
-          - service: scene.create
-            data:
-              scene_id: before_star_power
-              snapshot_entities:
-                - light.gaming_room
-          # Strobe / turn blue / flash
-          - repeat:
-              while:
-                - condition: state
-                  entity_id: binary_sensor.gh3_star_power
-                  state: "on"
-              sequence:
-                - service: light.turn_on
-                  target:
-                    entity_id: light.gaming_room
-                  data:
-                    rgb_color: [0, 180, 255]
-                    brightness: 255
-                - delay:
-                    milliseconds: 200
-                - service: light.turn_on
-                  target:
-                    entity_id: light.gaming_room
-                  data:
-                    rgb_color: [255, 255, 255]
-                    brightness: 255
-                - delay:
-                    milliseconds: 200
+alias: Guitar Hero III - Smooth Pulse Living Room Lights on Star Power
+description: >-
+  Smoothly pulses all lights while Star Power is active, then individually
+  restores each light's prior state.
+triggers:
+  - trigger: state
+    entity_id: binary_sensor.guitar_hero_iii_star_power
+    to: 'on'
+actions:
+  - variables:
+      target_lights:
+        - light.your_light_1
+        - light.your_light_2
+      light_states: |-
+        {% set ns = namespace(states=[]) %} {% for l in target_lights %}
+          {% set ns.states = ns.states + [{
+            'entity_id': l,
+            'was_on': is_state(l, 'on'),
+            'brightness': state_attr(l, 'brightness') | default(128, true)
+          }] %}
+        {% endfor %} {{ ns.states }}
+  - repeat:
+      while:
+        - condition: state
+          entity_id: binary_sensor.guitar_hero_iii_star_power
+          state: 'on'
+      sequence:
+        - action: light.turn_on
+          target:
+            entity_id:
+              - light.your_light_1
+              - light.your_light_2
+          data:
+            brightness: 255
+        - delay:
+            milliseconds: 500
+        - action: light.turn_on
+          target:
+            entity_id:
+              - light.your_light_1
+              - light.your_light_2
+          data:
+            brightness: 60
+        - delay:
+            milliseconds: 500
+  - repeat:
+      for_each: '{{ light_states }}'
+      sequence:
+        - if:
+            - condition: template
+              value_template: '{{ repeat.item.was_on }}'
+          then:
+            - action: light.turn_on
+              target:
+                entity_id: '{{ repeat.item.entity_id }}'
+              data:
+                brightness: '{{ repeat.item.brightness }}'
+          else:
+            - action: light.turn_off
+              target:
+                entity_id: '{{ repeat.item.entity_id }}'
+mode: single
 
-      - conditions:
-          - condition: trigger
-            id: deactivated
-        sequence:
-          # Restore previous light state
-          - service: scene.turn_on
-            target:
-              entity_id: scene.before_star_power
-mode: restart
 ```
 
 ### 🔴 Flash Red on Missed Note Example

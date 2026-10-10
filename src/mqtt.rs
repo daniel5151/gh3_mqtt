@@ -1,7 +1,13 @@
-use std::io::{Read, Write};
-use std::net::{TcpStream, ToSocketAddrs};
-use std::time::{Duration, Instant};
-use zerocopy::{FromBytes, Immutable, IntoBytes, KnownLayout};
+use std::io::Read;
+use std::io::Write;
+use std::net::TcpStream;
+use std::net::ToSocketAddrs;
+use std::time::Duration;
+use std::time::Instant;
+use zerocopy::FromBytes;
+use zerocopy::Immutable;
+use zerocopy::IntoBytes;
+use zerocopy::KnownLayout;
 
 #[repr(C)]
 #[derive(FromBytes, IntoBytes, KnownLayout, Immutable, Clone, Copy, Debug, PartialEq)]

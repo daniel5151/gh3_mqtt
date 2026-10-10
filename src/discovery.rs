@@ -20,7 +20,8 @@ pub fn generate_ha_discovery_messages(
         "manufacturer": "Neversoft / Aspyr"
     });
 
-    // Dual availability for gameplay sensors: game must be running AND song must be playing
+    // Dual availability for gameplay sensors: game must be running AND song
+    // must be playing
     let in_game_availability = json!([
         {
             "topic": status_topic,
@@ -45,7 +46,10 @@ pub fn generate_ha_discovery_messages(
 
     // 1. Star Power Active (Binary Sensor - in-game only)
     messages.push(DiscoveryMessage {
-        topic: format!("{}/binary_sensor/{}_star_power/config", discovery_prefix, topic_prefix),
+        topic: format!(
+            "{}/binary_sensor/{}_star_power/config",
+            discovery_prefix, topic_prefix
+        ),
         payload: json!({
             "name": "Star Power",
             "unique_id": format!("{}_star_power", topic_prefix),
@@ -57,12 +61,16 @@ pub fn generate_ha_discovery_messages(
             "availability_mode": "all",
             "icon": "mdi:lightning-bolt",
             "device": device
-        }).to_string(),
+        })
+        .to_string(),
     });
 
     // 2. Star Power Gauge (Sensor % - in-game only)
     messages.push(DiscoveryMessage {
-        topic: format!("{}/sensor/{}_star_power_gauge/config", discovery_prefix, topic_prefix),
+        topic: format!(
+            "{}/sensor/{}_star_power_gauge/config",
+            discovery_prefix, topic_prefix
+        ),
         payload: json!({
             "name": "Star Power Gauge",
             "unique_id": format!("{}_star_power_gauge", topic_prefix),
@@ -72,12 +80,16 @@ pub fn generate_ha_discovery_messages(
             "availability_mode": "all",
             "icon": "mdi:lightning-bolt-circle",
             "device": device
-        }).to_string(),
+        })
+        .to_string(),
     });
 
     // 3. Current Song (Sensor: "Title - Artist" - game level)
     messages.push(DiscoveryMessage {
-        topic: format!("{}/sensor/{}_current_song/config", discovery_prefix, topic_prefix),
+        topic: format!(
+            "{}/sensor/{}_current_song/config",
+            discovery_prefix, topic_prefix
+        ),
         payload: json!({
             "name": "Current Song",
             "unique_id": format!("{}_current_song", topic_prefix),
@@ -86,12 +98,16 @@ pub fn generate_ha_discovery_messages(
             "availability_mode": "all",
             "icon": "mdi:music",
             "device": device
-        }).to_string(),
+        })
+        .to_string(),
     });
 
     // 4. Difficulty (Sensor: "Easy"/"Medium"/"Hard"/"Expert" - game level)
     messages.push(DiscoveryMessage {
-        topic: format!("{}/sensor/{}_difficulty/config", discovery_prefix, topic_prefix),
+        topic: format!(
+            "{}/sensor/{}_difficulty/config",
+            discovery_prefix, topic_prefix
+        ),
         payload: json!({
             "name": "Difficulty",
             "unique_id": format!("{}_difficulty", topic_prefix),
@@ -100,7 +116,8 @@ pub fn generate_ha_discovery_messages(
             "availability_mode": "all",
             "icon": "mdi:speedometer",
             "device": device
-        }).to_string(),
+        })
+        .to_string(),
     });
 
     // 5. Note Streak (Sensor - in-game only)
@@ -114,12 +131,16 @@ pub fn generate_ha_discovery_messages(
             "availability_mode": "all",
             "icon": "mdi:music-note",
             "device": device
-        }).to_string(),
+        })
+        .to_string(),
     });
 
     // 6. Score Multiplier (Sensor - in-game only)
     messages.push(DiscoveryMessage {
-        topic: format!("{}/sensor/{}_multiplier/config", discovery_prefix, topic_prefix),
+        topic: format!(
+            "{}/sensor/{}_multiplier/config",
+            discovery_prefix, topic_prefix
+        ),
         payload: json!({
             "name": "Score Multiplier",
             "unique_id": format!("{}_multiplier", topic_prefix),
@@ -129,7 +150,8 @@ pub fn generate_ha_discovery_messages(
             "availability_mode": "all",
             "icon": "mdi:close",
             "device": device
-        }).to_string(),
+        })
+        .to_string(),
     });
 
     // 7. Total Score (Sensor - in-game only)
@@ -143,12 +165,16 @@ pub fn generate_ha_discovery_messages(
             "availability_mode": "all",
             "icon": "mdi:counter",
             "device": device
-        }).to_string(),
+        })
+        .to_string(),
     });
 
     // 8. Notes Missed (Sensor - in-game only)
     messages.push(DiscoveryMessage {
-        topic: format!("{}/sensor/{}_notes_missed/config", discovery_prefix, topic_prefix),
+        topic: format!(
+            "{}/sensor/{}_notes_missed/config",
+            discovery_prefix, topic_prefix
+        ),
         payload: json!({
             "name": "Notes Missed",
             "unique_id": format!("{}_notes_missed", topic_prefix),
@@ -157,12 +183,16 @@ pub fn generate_ha_discovery_messages(
             "availability_mode": "all",
             "icon": "mdi:close-circle-outline",
             "device": device
-        }).to_string(),
+        })
+        .to_string(),
     });
 
     // 9. Notes Hit (Sensor - in-game only)
     messages.push(DiscoveryMessage {
-        topic: format!("{}/sensor/{}_notes_hit/config", discovery_prefix, topic_prefix),
+        topic: format!(
+            "{}/sensor/{}_notes_hit/config",
+            discovery_prefix, topic_prefix
+        ),
         payload: json!({
             "name": "Notes Hit",
             "unique_id": format!("{}_notes_hit", topic_prefix),
@@ -171,12 +201,16 @@ pub fn generate_ha_discovery_messages(
             "availability_mode": "all",
             "icon": "mdi:check-circle-outline",
             "device": device
-        }).to_string(),
+        })
+        .to_string(),
     });
 
     // 10. Game Paused (Binary Sensor - in-game only)
     messages.push(DiscoveryMessage {
-        topic: format!("{}/binary_sensor/{}_paused/config", discovery_prefix, topic_prefix),
+        topic: format!(
+            "{}/binary_sensor/{}_paused/config",
+            discovery_prefix, topic_prefix
+        ),
         payload: json!({
             "name": "Game Paused",
             "unique_id": format!("{}_paused", topic_prefix),
@@ -187,7 +221,8 @@ pub fn generate_ha_discovery_messages(
             "availability_mode": "all",
             "icon": "mdi:pause",
             "device": device
-        }).to_string(),
+        })
+        .to_string(),
     });
 
     messages

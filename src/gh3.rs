@@ -1,10 +1,16 @@
 use serde::Serialize;
 use std::ffi::c_void;
-use windows::Win32::System::Memory::{
-    MEM_COMMIT, MEMORY_BASIC_INFORMATION, PAGE_EXECUTE_READ, PAGE_EXECUTE_READWRITE, PAGE_READONLY,
-    PAGE_READWRITE, VirtualQuery,
-};
-use zerocopy::{FromBytes, Immutable, IntoBytes, KnownLayout};
+use windows::Win32::System::Memory::MEM_COMMIT;
+use windows::Win32::System::Memory::MEMORY_BASIC_INFORMATION;
+use windows::Win32::System::Memory::PAGE_EXECUTE_READ;
+use windows::Win32::System::Memory::PAGE_EXECUTE_READWRITE;
+use windows::Win32::System::Memory::PAGE_READONLY;
+use windows::Win32::System::Memory::PAGE_READWRITE;
+use windows::Win32::System::Memory::VirtualQuery;
+use zerocopy::FromBytes;
+use zerocopy::Immutable;
+use zerocopy::IntoBytes;
+use zerocopy::KnownLayout;
 
 const fn qb_hash(s: &str) -> u32 {
     let bytes = s.as_bytes();
@@ -183,7 +189,8 @@ impl Default for GameState {
     }
 }
 
-/// A safe accessor for reading process memory within the Guitar Hero III address space.
+/// A safe accessor for reading process memory within the Guitar Hero III
+/// address space.
 #[derive(Clone, Copy, Debug)]
 pub struct MemoryView {
     _private: (),
@@ -194,13 +201,14 @@ impl MemoryView {
     ///
     /// # Safety
     ///
-    /// The caller must ensure that this is executed within the address space of a running
-    /// Guitar Hero III process.
+    /// The caller must ensure that this is executed within the address space of
+    /// a running Guitar Hero III process.
     pub const unsafe fn new() -> Self {
         Self { _private: () }
     }
 
-    /// Checks if the memory range `[ptr, ptr + size)` is currently committed and readable in user space.
+    /// Checks if the memory range `[ptr, ptr + size)` is currently committed
+    /// and readable in user space.
     pub fn is_readable(&self, ptr: *const c_void, size: usize) -> bool {
         let addr = ptr as usize;
         #[cfg(target_pointer_width = "32")]
@@ -211,14 +219,10 @@ impl MemoryView {
             return false;
         }
         let mut mbi = MEMORY_BASIC_INFORMATION::default();
-        // SAFETY: Querying memory page attributes via VirtualQuery with a stack-allocated buffer.
-        let res = unsafe {
-            VirtualQuery(
-                Some(ptr),
-                &mut mbi,
-                size_of::<MEMORY_BASIC_INFORMATION>(),
-            )
-        };
+        // SAFETY: Querying memory page attributes via VirtualQuery with a
+        // stack-allocated buffer.
+        let res =
+            unsafe { VirtualQuery(Some(ptr), &mut mbi, size_of::<MEMORY_BASIC_INFORMATION>()) };
         if res == 0 || mbi.State != MEM_COMMIT {
             return false;
         }
@@ -227,7 +231,8 @@ impl MemoryView {
         (protect.0 & allowed.0) != 0 && (addr + size <= mbi.BaseAddress as usize + mbi.RegionSize)
     }
 
-    /// Returns the number of readable bytes (up to `max_len`) available starting at `ptr`.
+    /// Returns the number of readable bytes (up to `max_len`) available
+    /// starting at `ptr`.
     pub fn readable_len(&self, ptr: *const c_void, max_len: usize) -> usize {
         let addr = ptr as usize;
         #[cfg(target_pointer_width = "32")]
@@ -238,14 +243,10 @@ impl MemoryView {
             return 0;
         }
         let mut mbi = MEMORY_BASIC_INFORMATION::default();
-        // SAFETY: Querying memory page attributes via VirtualQuery with a stack-allocated buffer.
-        let res = unsafe {
-            VirtualQuery(
-                Some(ptr),
-                &mut mbi,
-                size_of::<MEMORY_BASIC_INFORMATION>(),
-            )
-        };
+        // SAFETY: Querying memory page attributes via VirtualQuery with a
+        // stack-allocated buffer.
+        let res =
+            unsafe { VirtualQuery(Some(ptr), &mut mbi, size_of::<MEMORY_BASIC_INFORMATION>()) };
         if res == 0 || mbi.State != MEM_COMMIT {
             return 0;
         }
@@ -261,18 +262,21 @@ impl MemoryView {
         (page_end - addr).min(max_len)
     }
 
-    /// Safely copies a value of type `T` from `addr` using zerocopy if readable.
+    /// Safely copies a value of type `T` from `addr` using zerocopy if
+    /// readable.
     pub fn read_val<T: FromBytes>(&self, addr: usize) -> Option<T> {
         let size = size_of::<T>();
         if !self.is_readable(addr as *const c_void, size) {
             return None;
         }
-        // SAFETY: is_readable verified that the address range is committed and readable in user space.
+        // SAFETY: is_readable verified that the address range is committed and
+        // readable in user space.
         let slice = unsafe { std::slice::from_raw_parts(addr as *const u8, size) };
         T::read_from_bytes(slice).ok()
     }
 
-    /// Extracts a null-terminated string (CString or UTF-16 WString) from a `QbStructItem`.
+    /// Extracts a null-terminated string (CString or UTF-16 WString) from a
+    /// `QbStructItem`.
     pub fn extract_string_from_item(&self, item: &QbStructItem) -> Option<String> {
         let type_val = item.item_type();
         let addr = item.value as usize;
@@ -283,7 +287,8 @@ impl MemoryView {
         match type_val {
             3 => {
                 // CString (1-byte characters)
-                // SAFETY: addr was confirmed readable for len bytes by readable_len.
+                // SAFETY: addr was confirmed readable for len bytes by
+                // readable_len.
                 let slice = unsafe { std::slice::from_raw_parts(addr as *const u8, len) };
                 let nul_pos = slice.iter().position(|&b| b == 0).unwrap_or(slice.len());
                 if nul_pos == 0 {
@@ -301,7 +306,8 @@ impl MemoryView {
                 if u16_len == 0 {
                     return None;
                 }
-                // SAFETY: addr was confirmed readable for at least u16_len * 2 bytes by readable_len.
+                // SAFETY: addr was confirmed readable for at least u16_len * 2
+                // bytes by readable_len.
                 let slice = unsafe { std::slice::from_raw_parts(addr as *const u8, u16_len * 2) };
                 let words: Vec<u16> = slice
                     .as_chunks::<2>()
@@ -327,7 +333,8 @@ pub struct QbStructView<'a> {
 }
 
 impl<'a> QbStructView<'a> {
-    /// Attempts to wrap a `QbStruct` at `addr` after validating its readability.
+    /// Attempts to wrap a `QbStruct` at `addr` after validating its
+    /// readability.
     pub fn new(mem: &'a MemoryView, addr: usize) -> Option<Self> {
         if addr != 0 && mem.read_val::<QbStruct>(addr).is_some() {
             Some(Self { mem, addr })
@@ -336,7 +343,8 @@ impl<'a> QbStructView<'a> {
         }
     }
 
-    /// Finds a struct item matching `key` by traversing the linked list (and any nested `QbMap`).
+    /// Finds a struct item matching `key` by traversing the linked list (and
+    /// any nested `QbMap`).
     pub fn get_item(&self, key: u32) -> Option<QbStructItem> {
         let st = self.mem.read_val::<QbStruct>(self.addr)?;
         let mut item_addr = st.first as usize;
@@ -552,8 +560,8 @@ pub fn read_game_state(mem: &MemoryView) -> GameState {
         state.streak = run;
     }
 
-    // Multiplier climbs 1x -> 2x -> 3x -> 4x with streak (0-9, 10-19, 20-29, 30+ notes)
-    // Doubles to 2x, 4x, 6x, 8x during Star Power!
+    // Multiplier climbs 1x -> 2x -> 3x -> 4x with streak (0-9, 10-19, 20-29,
+    // 30+ notes) Doubles to 2x, 4x, 6x, 8x during Star Power!
     let base_mult = match state.streak {
         0..=9 => 1,
         10..=19 => 2,
@@ -606,7 +614,8 @@ pub fn resolve_difficulty(diff_key: u32) -> &'static str {
     }
 }
 
-/// Resolves the current song title and artist from FastGH3 metadata or songlist properties.
+/// Resolves the current song title and artist from FastGH3 metadata or songlist
+/// properties.
 pub fn read_song_info(mem: &MemoryView, global_map: Option<&GlobalMapView<'_>>) -> Option<String> {
     // 1. Check fastgh3_meta struct (FastGH3 custom songs)
     if let Some(meta) = global_map.and_then(|map| map.get_struct(KEY_FASTGH3_META)) {

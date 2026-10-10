@@ -12,14 +12,18 @@ use mqtt::MqttClient;
 
 use std::fs::OpenOptions;
 use std::io::Write;
-use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::path::Path;
+use std::path::PathBuf;
+use std::sync::atomic::AtomicBool;
+use std::sync::atomic::Ordering;
 use std::thread;
-use std::time::{Duration, Instant};
+use std::time::Duration;
+use std::time::Instant;
 
 use windows::Win32::Foundation::HMODULE;
 use windows::Win32::System::LibraryLoader::DisableThreadLibraryCalls;
-use windows::Win32::System::SystemServices::{DLL_PROCESS_ATTACH, DLL_PROCESS_DETACH};
+use windows::Win32::System::SystemServices::DLL_PROCESS_ATTACH;
+use windows::Win32::System::SystemServices::DLL_PROCESS_DETACH;
 
 static RUNNING: AtomicBool = AtomicBool::new(false);
 
@@ -42,8 +46,16 @@ fn publish_all_entities(client: &mut MqttClient, config: &Config, state: &GameSt
     let pfx = &config.topic_prefix;
 
     // 1. Song Active Availability (playing / idle)
-    let song_active_payload: &[u8] = if state.is_playing { b"playing" } else { b"idle" };
-    let _ = client.publish(&format!("{}/game/song_active", pfx), song_active_payload, true);
+    let song_active_payload: &[u8] = if state.is_playing {
+        b"playing"
+    } else {
+        b"idle"
+    };
+    let _ = client.publish(
+        &format!("{}/game/song_active", pfx),
+        song_active_payload,
+        true,
+    );
 
     // 2. Game-level sensors (Song Title - Artist, Difficulty)
     let song_text = if state.is_playing {
@@ -51,8 +63,16 @@ fn publish_all_entities(client: &mut MqttClient, config: &Config, state: &GameSt
     } else {
         "Idle"
     };
-    let _ = client.publish(&format!("{}/game/current_song", pfx), song_text.as_bytes(), false);
-    let _ = client.publish(&format!("{}/game/difficulty", pfx), state.difficulty.as_bytes(), false);
+    let _ = client.publish(
+        &format!("{}/game/current_song", pfx),
+        song_text.as_bytes(),
+        false,
+    );
+    let _ = client.publish(
+        &format!("{}/game/difficulty", pfx),
+        state.difficulty.as_bytes(),
+        false,
+    );
     let _ = client.publish(
         &format!("{}/game/paused/state", pfx),
         if state.is_paused { b"ON" } else { b"OFF" },
@@ -62,7 +82,11 @@ fn publish_all_entities(client: &mut MqttClient, config: &Config, state: &GameSt
     // 3. Gameplay sensors
     let _ = client.publish(
         &format!("{}/player1/star_power/state", pfx),
-        if state.star_power_active { b"ON" } else { b"OFF" },
+        if state.star_power_active {
+            b"ON"
+        } else {
+            b"OFF"
+        },
         false,
     );
     let _ = client.publish(
@@ -153,7 +177,8 @@ fn worker_main() {
     let mut last_periodic_publish = Instant::now();
     let mut discovery_sent = false;
 
-    // SAFETY: Running inside the Guitar Hero III process where game engine memory is valid.
+    // SAFETY: Running inside the Guitar Hero III process where game engine
+    // memory is valid.
     let mem = unsafe { gh3::MemoryView::new() };
 
     while RUNNING.load(Ordering::SeqCst) {
@@ -161,7 +186,10 @@ fn worker_main() {
             if config.debug_log {
                 log_msg(
                     &log_path,
-                    &format!("Connecting to MQTT broker at {}:{}...", config.host, config.port),
+                    &format!(
+                        "Connecting to MQTT broker at {}:{}...",
+                        config.host, config.port
+                    ),
                 );
             }
 
@@ -185,7 +213,10 @@ fn worker_main() {
                         }
                         discovery_sent = true;
                         if config.debug_log {
-                            log_msg(&log_path, "Home Assistant MQTT discovery payloads published.");
+                            log_msg(
+                                &log_path,
+                                "Home Assistant MQTT discovery payloads published.",
+                            );
                         }
                     }
 
@@ -196,7 +227,10 @@ fn worker_main() {
                 }
                 Err(err) => {
                     if config.debug_log {
-                        log_msg(&log_path, &format!("MQTT connect error: {}. Retrying...", err));
+                        log_msg(
+                            &log_path,
+                            &format!("MQTT connect error: {}. Retrying...", err),
+                        );
                     }
                     thread::sleep(Duration::from_millis(3000));
                     continue;
@@ -210,11 +244,19 @@ fn worker_main() {
         // 1. Song Playing State Change
         if current_state.is_playing != last_state.is_playing {
             let song_active_topic = format!("{}/game/song_active", config.topic_prefix);
-            let song_active_payload: &[u8] = if current_state.is_playing { b"playing" } else { b"idle" };
+            let song_active_payload: &[u8] = if current_state.is_playing {
+                b"playing"
+            } else {
+                b"idle"
+            };
             let _ = client.publish(&song_active_topic, song_active_payload, true);
 
             let event_topic = format!("{}/player1/event", config.topic_prefix);
-            let event_payload = if current_state.is_playing { "song_started" } else { "song_ended" };
+            let event_payload = if current_state.is_playing {
+                "song_started"
+            } else {
+                "song_ended"
+            };
             let _ = client.publish(&event_topic, event_payload.as_bytes(), false);
 
             if config.debug_log {
@@ -222,7 +264,10 @@ fn worker_main() {
                     &log_path,
                     &format!(
                         "Song playing state changed: is_playing={}, song='{}', diff={}, paused={}",
-                        current_state.is_playing, current_state.current_song, current_state.difficulty, current_state.is_paused
+                        current_state.is_playing,
+                        current_state.current_song,
+                        current_state.difficulty,
+                        current_state.is_paused
                     ),
                 );
             }
@@ -239,7 +284,10 @@ fn worker_main() {
             if config.debug_log {
                 log_msg(
                     &log_path,
-                    &format!("Game pause state changed: is_paused={}", current_state.is_paused),
+                    &format!(
+                        "Game pause state changed: is_paused={}",
+                        current_state.is_paused
+                    ),
                 );
             }
         }
@@ -247,7 +295,11 @@ fn worker_main() {
         // 3. Song or Difficulty Change
         if current_state.current_song != last_state.current_song {
             let topic = format!("{}/game/current_song", config.topic_prefix);
-            let payload = if current_state.is_playing { &current_state.current_song } else { "Idle" };
+            let payload = if current_state.is_playing {
+                &current_state.current_song
+            } else {
+                "Idle"
+            };
             let _ = client.publish(&topic, payload.as_bytes(), false);
 
             if config.debug_log {
@@ -266,7 +318,11 @@ fn worker_main() {
         // 3. Star Power Active State Change
         if current_state.star_power_active != last_state.star_power_active {
             let topic = format!("{}/player1/star_power/state", config.topic_prefix);
-            let payload = if current_state.star_power_active { "ON" } else { "OFF" };
+            let payload = if current_state.star_power_active {
+                "ON"
+            } else {
+                "OFF"
+            };
             let _ = client.publish(&topic, payload.as_bytes(), false);
 
             let event_topic = format!("{}/player1/event", config.topic_prefix);
@@ -321,7 +377,8 @@ fn worker_main() {
             let payload = current_state.streak.to_string();
             let _ = client.publish(&topic, payload.as_bytes(), false);
 
-            // If streak dropped from > 0 down to 0 while playing a song, a note was missed / overstrummed!
+            // If streak dropped from > 0 down to 0 while playing a song, a note
+            // was missed / overstrummed!
             if current_state.is_playing && last_state.streak > 0 && current_state.streak == 0 {
                 let event_topic = format!("{}/player1/event", config.topic_prefix);
                 let _ = client.publish(&event_topic, b"note_missed", false);
@@ -380,9 +437,10 @@ fn worker_main() {
 
         // Keepalive / Ping
         if let Err(e) = client.ping_if_needed()
-            && config.debug_log {
-                log_msg(&log_path, &format!("Ping error: {}. Will reconnect.", e));
-            }
+            && config.debug_log
+        {
+            log_msg(&log_path, &format!("Ping error: {}. Will reconnect.", e));
+        }
 
         thread::sleep(Duration::from_millis(config.poll_interval_ms));
     }
@@ -411,7 +469,8 @@ pub unsafe extern "system" fn DllMain(
 ) -> i32 {
     match reason {
         DLL_PROCESS_ATTACH => {
-            // SAFETY: Safe to disable thread attach/detach calls as this DLL does not track thread state.
+            // SAFETY: Safe to disable thread attach/detach calls as this DLL
+            // does not track thread state.
             let _ = unsafe { DisableThreadLibraryCalls(hinst) };
             RUNNING.store(true, Ordering::SeqCst);
             thread::spawn(worker_main);

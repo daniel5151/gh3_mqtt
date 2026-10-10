@@ -46,7 +46,11 @@ impl Config {
 
         for line in content.lines() {
             let line = line.trim();
-            if line.is_empty() || line.starts_with('#') || line.starts_with(';') || line.starts_with('[') {
+            if line.is_empty()
+                || line.starts_with('#')
+                || line.starts_with(';')
+                || line.starts_with('[')
+            {
                 continue;
             }
 
@@ -61,10 +65,18 @@ impl Config {
                         }
                     }
                     "username" => {
-                        config.username = if val.is_empty() { None } else { Some(val.to_string()) };
+                        config.username = if val.is_empty() {
+                            None
+                        } else {
+                            Some(val.to_string())
+                        };
                     }
                     "password" => {
-                        config.password = if val.is_empty() { None } else { Some(val.to_string()) };
+                        config.password = if val.is_empty() {
+                            None
+                        } else {
+                            Some(val.to_string())
+                        };
                     }
                     "topic_prefix" => {
                         config.topic_prefix = val.trim_matches('/').to_string();
@@ -103,8 +115,8 @@ host = 127.0.0.1
 port = 1883
 
 # Optional MQTT credentials (leave blank if your broker does not require authentication)
-username = 
-password = 
+username =
+password =
 
 # Base topic prefix (e.g. gh3 -> gh3/player1/star_power, etc.)
 topic_prefix = gh3

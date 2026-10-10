@@ -7,10 +7,17 @@ edition = "2024"
 crate-type = ["cdylib"]
 
 [dependencies]
-serde = { version = "1.0", features = ["derive"] }
-serde_json = "1.0"
+serde = { version = "1.0", default-features = false, features = ["derive", "alloc"] }
+serde_json = { version = "1.0", default-features = false, features = ["alloc"] }
 windows = { version = "0.58", features = ["Win32_System_SystemServices", "Win32_System_LibraryLoader", "Win32_System_Memory", "Win32_Foundation"] }
 zerocopy = { version = "0.8.62", features = ["derive"] }
+
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true
 
 # Lint list yoinked from https://github.com/microsoft/openvmm/blob/main/Cargo.toml
 

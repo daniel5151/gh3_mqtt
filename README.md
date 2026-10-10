@@ -166,10 +166,23 @@ mode: restart
 
 ## 🛠️ Building From Source
 
-To rebuild the plugin:
+### Standard Release Build (Stable)
+
+Configured with `min-sized-rust` release profile flags (`opt-level = "z"`, `lto = true`, `codegen-units = 1`, `panic = "abort"`, `strip = true`) and default `i686-pc-windows-msvc` target:
 
 ```powershell
 cd gh3_mqtt
-cargo build --release --target i686-pc-windows-msvc
-Copy-Item target\i686-pc-windows-msvc\release\gh3_mqtt.dll ..\PLUGINS\gh3_mqtt.dll -Force
+cargo build --release
 ```
+*Output size: **~240 KB** (down from ~357 KB baseline).*
+
+### Ultra-Crunched Build (Nightly + `build-std`)
+
+For maximum size crunching with `build-std`, `panic = "immediate-abort"`, and location/debug stripped:
+
+```powershell
+cd gh3_mqtt
+.\build-min.ps1
+```
+*Output size: **~132 KB** (~63% total reduction).*
+

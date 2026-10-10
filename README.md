@@ -39,26 +39,25 @@ A lightweight, zero-hitch native plugin for **Guitar Hero III (PC / BetterGH3 / 
 
 ---
 
-## ⚙️ Configuration (`PLUGINS/gh3_mqtt.ini`)
+## ⚙️ Configuration (`PLUGINS/gh3_mqtt.toml`)
 
-Edit `PLUGINS/gh3_mqtt.ini` to configure your MQTT broker connection:
+Edit `PLUGINS/gh3_mqtt.toml` to configure your MQTT broker connection and telemetry reporting:
 
-```ini
-[mqtt]
+```toml
 # MQTT broker host/IP address
-host = 192.168.1.100
+host = "192.168.1.100"
 port = 1883
 
-# Optional MQTT broker credentials (leave blank if not needed)
-username =
-password =
+# Optional MQTT broker credentials (leave commented or unset if not needed)
+# username = "my_user"
+# password = "my_password"
 
 # Base topic prefix (default: gh3)
-topic_prefix = gh3
+topic_prefix = "gh3"
 
 # Home Assistant MQTT Auto-Discovery (creates the Device & Entities in HA automatically)
 ha_discovery = true
-ha_discovery_prefix = homeassistant
+ha_discovery_prefix = "homeassistant"
 
 # Polling interval in milliseconds (16ms = ~60 FPS)
 poll_interval_ms = 16
@@ -68,7 +67,40 @@ gauge_threshold_pct = 1.0
 
 # Write diagnostic logs to PLUGINS\gh3_mqtt.log
 debug_log = true
+
+# Master toggle for high-frequency telemetry and events (score, streak,
+# multiplier, notes_hit, notes_missed, star_power_gauge, periodic state, and note_missed event).
+# Off (false) by default to prevent flooding MQTT brokers and Home Assistant databases.
+hifreq = false
+
+[sensors]
+# Individual sensor and event toggles (uncomment to override the hifreq default)
+# star_power = true
+# current_song = true
+# difficulty = true
+# paused = true
+# events = true
+# star_power_gauge = true
+# streak = true
+# multiplier = true
+# score = true
+# notes_hit = true
+# notes_missed = true
+# note_missed_event = true
+# periodic_state = true
 ```
+
+### ⚡ Low-Frequency vs High-Frequency Telemetry
+
+To avoid flooding MQTT brokers and Home Assistant recorder databases with rapid note-by-note telemetry during intense songs (e.g. 15-30 note changes per second):
+
+* **`hifreq` is disabled (`false`) by default**: Rapid updates (`score`, `streak`, `multiplier`, `notes_hit`, `notes_missed`, `star_power_gauge`, periodic full state, and `note_missed` edge events) are suppressed out of the box.
+* Essential low-frequency state updates (`star_power` active, `current_song`, `difficulty`, `paused`, `song_started`/`ended`, `star_power_activated`/`deactivated`) are published.
+* Set **`hifreq = true`** at the top level to enable all high-frequency sensors and events at once.
+* Any individual sensor or event can be selectively toggled inside the `[sensors]` table by uncommenting its line (e.g. leaving `hifreq = false` while enabling `score = true`).
+* Config parsing is **strictly validated** via Serde (`#[serde(deny_unknown_fields)]`). If malformed TOML or unknown keys are detected, the plugin pops a Windows error dialog with details and halts cleanly rather than running with corrupted state.
+* When Home Assistant auto-discovery is enabled, disabled sensors are automatically unregistered from Home Assistant.
+
 
 ---
 

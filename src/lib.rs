@@ -21,11 +21,31 @@ use std::time::Duration;
 use std::time::Instant;
 
 use windows::Win32::Foundation::HMODULE;
+use windows::Win32::Foundation::HWND;
 use windows::Win32::System::LibraryLoader::DisableThreadLibraryCalls;
 use windows::Win32::System::SystemServices::DLL_PROCESS_ATTACH;
 use windows::Win32::System::SystemServices::DLL_PROCESS_DETACH;
+use windows::Win32::UI::WindowsAndMessaging::MB_ICONERROR;
+use windows::Win32::UI::WindowsAndMessaging::MB_OK;
+use windows::Win32::UI::WindowsAndMessaging::MessageBoxW;
+use windows::core::PCWSTR;
 
 static RUNNING: AtomicBool = AtomicBool::new(false);
+
+fn show_error_box(title: &str, message: &str) {
+    let wide_title: Vec<u16> = title.encode_utf16().chain(std::iter::once(0)).collect();
+    let wide_message: Vec<u16> = message.encode_utf16().chain(std::iter::once(0)).collect();
+    unsafe {
+        // SAFETY: Calling standard Win32 MessageBoxW with null HWND and
+        // null-terminated UTF-16 strings.
+        MessageBoxW(
+            HWND::default(),
+            PCWSTR(wide_message.as_ptr()),
+            PCWSTR(wide_title.as_ptr()),
+            MB_OK | MB_ICONERROR,
+        );
+    }
+}
 
 fn log_msg<P: AsRef<Path>>(log_path: P, msg: &str) {
     if let Ok(mut file) = OpenOptions::new().create(true).append(true).open(log_path) {
@@ -44,6 +64,7 @@ fn get_plugin_dir() -> PathBuf {
 
 fn publish_all_entities(client: &mut MqttClient, config: &Config, state: &GameState) {
     let pfx = &config.topic_prefix;
+    let s = &config.sensors;
 
     // 1. Song Active Availability (playing / idle)
     let song_active_payload: &[u8] = if state.is_playing {
@@ -57,105 +78,142 @@ fn publish_all_entities(client: &mut MqttClient, config: &Config, state: &GameSt
         true,
     );
 
-    // 2. Game-level sensors (Song Title - Artist, Difficulty)
-    let song_text = if state.is_playing {
-        &state.current_song
-    } else {
-        "Idle"
-    };
-    let _ = client.publish(
-        &format!("{}/game/current_song", pfx),
-        song_text.as_bytes(),
-        false,
-    );
-    let _ = client.publish(
-        &format!("{}/game/difficulty", pfx),
-        state.difficulty.as_bytes(),
-        false,
-    );
-    let _ = client.publish(
-        &format!("{}/game/paused/state", pfx),
-        if state.is_paused { b"ON" } else { b"OFF" },
-        false,
-    );
+    // 2. Game-level sensors (Song Title - Artist, Difficulty, Paused)
+    if s.current_song {
+        let song_text = if state.is_playing {
+            &state.current_song
+        } else {
+            "Idle"
+        };
+        let _ = client.publish(
+            &format!("{}/game/current_song", pfx),
+            song_text.as_bytes(),
+            false,
+        );
+    }
+    if s.difficulty {
+        let _ = client.publish(
+            &format!("{}/game/difficulty", pfx),
+            state.difficulty.as_bytes(),
+            false,
+        );
+    }
+    if s.paused {
+        let _ = client.publish(
+            &format!("{}/game/paused/state", pfx),
+            if state.is_paused { b"ON" } else { b"OFF" },
+            false,
+        );
+    }
 
     // 3. Gameplay sensors
-    let _ = client.publish(
-        &format!("{}/player1/star_power/state", pfx),
-        if state.star_power_active {
-            b"ON"
-        } else {
-            b"OFF"
-        },
-        false,
-    );
-    let _ = client.publish(
-        &format!("{}/player1/star_power/gauge", pfx),
-        format!("{:.1}", state.star_power_gauge).as_bytes(),
-        false,
-    );
-    let _ = client.publish(
-        &format!("{}/player1/streak", pfx),
-        state.streak.to_string().as_bytes(),
-        false,
-    );
-    let _ = client.publish(
-        &format!("{}/player1/multiplier", pfx),
-        state.effective_multiplier.to_string().as_bytes(),
-        false,
-    );
-    let _ = client.publish(
-        &format!("{}/player1/score", pfx),
-        state.score.to_string().as_bytes(),
-        false,
-    );
-    let _ = client.publish(
-        &format!("{}/player1/notes_missed", pfx),
-        state.notes_missed.to_string().as_bytes(),
-        false,
-    );
-    let _ = client.publish(
-        &format!("{}/player1/notes_hit", pfx),
-        state.notes_hit.to_string().as_bytes(),
-        false,
-    );
+    if s.star_power {
+        let _ = client.publish(
+            &format!("{}/player1/star_power/state", pfx),
+            if state.star_power_active {
+                b"ON"
+            } else {
+                b"OFF"
+            },
+            false,
+        );
+        let attr_json = serde_json::json!({
+            "song": state.current_song,
+            "difficulty": state.difficulty,
+            "gauge": state.star_power_gauge,
+            "streak": state.streak,
+            "multiplier": state.effective_multiplier,
+            "score": state.score,
+            "notes_missed": state.notes_missed,
+            "notes_hit": state.notes_hit,
+            "is_paused": state.is_paused,
+        });
+        let _ = client.publish(
+            &format!("{}/player1/star_power/attributes", pfx),
+            attr_json.to_string().as_bytes(),
+            false,
+        );
+    }
+    if s.star_power_gauge {
+        let _ = client.publish(
+            &format!("{}/player1/star_power/gauge", pfx),
+            format!("{:.1}", state.star_power_gauge).as_bytes(),
+            false,
+        );
+    }
+    if s.streak {
+        let _ = client.publish(
+            &format!("{}/player1/streak", pfx),
+            state.streak.to_string().as_bytes(),
+            false,
+        );
+    }
+    if s.multiplier {
+        let _ = client.publish(
+            &format!("{}/player1/multiplier", pfx),
+            state.effective_multiplier.to_string().as_bytes(),
+            false,
+        );
+    }
+    if s.score {
+        let _ = client.publish(
+            &format!("{}/player1/score", pfx),
+            state.score.to_string().as_bytes(),
+            false,
+        );
+    }
+    if s.notes_missed {
+        let _ = client.publish(
+            &format!("{}/player1/notes_missed", pfx),
+            state.notes_missed.to_string().as_bytes(),
+            false,
+        );
+    }
+    if s.notes_hit {
+        let _ = client.publish(
+            &format!("{}/player1/notes_hit", pfx),
+            state.notes_hit.to_string().as_bytes(),
+            false,
+        );
+    }
 
-    let attr_json = serde_json::json!({
-        "song": state.current_song,
-        "difficulty": state.difficulty,
-        "gauge": state.star_power_gauge,
-        "streak": state.streak,
-        "multiplier": state.effective_multiplier,
-        "score": state.score,
-        "notes_missed": state.notes_missed,
-        "notes_hit": state.notes_hit,
-        "is_paused": state.is_paused,
-    });
-    let _ = client.publish(
-        &format!("{}/player1/star_power/attributes", pfx),
-        attr_json.to_string().as_bytes(),
-        false,
-    );
-
-    if let Ok(json_bytes) = serde_json::to_vec(state) {
-        let _ = client.publish(&format!("{}/player1/state", pfx), &json_bytes, false);
+    if s.periodic_state {
+        if let Ok(json_bytes) = serde_json::to_vec(state) {
+            let _ = client.publish(&format!("{}/player1/state", pfx), &json_bytes, false);
+        }
     }
 }
 
 fn worker_main() {
     let plugin_dir = get_plugin_dir();
-    let ini_path = plugin_dir.join("gh3_mqtt.ini");
+    let toml_path = plugin_dir.join("gh3_mqtt.toml");
     let log_path = plugin_dir.join("gh3_mqtt.log");
 
-    let config = Config::load_or_default(&ini_path);
+    let config = match Config::load_strict(&toml_path) {
+        Ok(c) => c,
+        Err(err) => {
+            let msg = format!(
+                "Failed to load configuration from '{}':\n\n{}",
+                toml_path.display(),
+                err
+            );
+            log_msg(&log_path, &format!("FATAL: {}", msg));
+            show_error_box("Guitar Hero III - MQTT Plugin Error", &msg);
+            return;
+        }
+    };
 
     if config.debug_log {
         log_msg(&log_path, "GH3 MQTT Plugin starting up...");
         log_msg(
             &log_path,
             &format!(
-                "Config loaded: broker={}:{}, prefix={}, poll={}ms",
-                config.host, config.port, config.topic_prefix, config.poll_interval_ms
+                "Config loaded: broker={}:{}, prefix={}, poll={}ms, hifreq={}",
+                config.host,
+                config.port,
+                config.topic_prefix,
+                config.poll_interval_ms,
+                config.hifreq
             ),
         );
     }
@@ -207,6 +265,7 @@ fn worker_main() {
                         let msgs = generate_ha_discovery_messages(
                             &config.ha_discovery_prefix,
                             &config.topic_prefix,
+                            &config.sensors,
                         );
                         for msg in msgs {
                             let _ = client.publish(&msg.topic, msg.payload.as_bytes(), true);
@@ -251,13 +310,15 @@ fn worker_main() {
             };
             let _ = client.publish(&song_active_topic, song_active_payload, true);
 
-            let event_topic = format!("{}/player1/event", config.topic_prefix);
-            let event_payload = if current_state.is_playing {
-                "song_started"
-            } else {
-                "song_ended"
-            };
-            let _ = client.publish(&event_topic, event_payload.as_bytes(), false);
+            if config.sensors.events {
+                let event_topic = format!("{}/player1/event", config.topic_prefix);
+                let event_payload = if current_state.is_playing {
+                    "song_started"
+                } else {
+                    "song_ended"
+                };
+                let _ = client.publish(&event_topic, event_payload.as_bytes(), false);
+            }
 
             if config.debug_log {
                 log_msg(
@@ -276,7 +337,7 @@ fn worker_main() {
         }
 
         // 2. Song Paused State Change
-        if current_state.is_paused != last_state.is_paused {
+        if config.sensors.paused && current_state.is_paused != last_state.is_paused {
             let topic = format!("{}/game/paused/state", config.topic_prefix);
             let payload = if current_state.is_paused { "ON" } else { "OFF" };
             let _ = client.publish(&topic, payload.as_bytes(), false);
@@ -293,7 +354,7 @@ fn worker_main() {
         }
 
         // 3. Song or Difficulty Change
-        if current_state.current_song != last_state.current_song {
+        if config.sensors.current_song && current_state.current_song != last_state.current_song {
             let topic = format!("{}/game/current_song", config.topic_prefix);
             let payload = if current_state.is_playing {
                 &current_state.current_song
@@ -310,42 +371,46 @@ fn worker_main() {
             }
         }
 
-        if current_state.difficulty != last_state.difficulty {
+        if config.sensors.difficulty && current_state.difficulty != last_state.difficulty {
             let topic = format!("{}/game/difficulty", config.topic_prefix);
             let _ = client.publish(&topic, current_state.difficulty.as_bytes(), false);
         }
 
-        // 3. Star Power Active State Change
+        // 4. Star Power Active State Change
         if current_state.star_power_active != last_state.star_power_active {
-            let topic = format!("{}/player1/star_power/state", config.topic_prefix);
-            let payload = if current_state.star_power_active {
-                "ON"
-            } else {
-                "OFF"
-            };
-            let _ = client.publish(&topic, payload.as_bytes(), false);
+            if config.sensors.star_power {
+                let topic = format!("{}/player1/star_power/state", config.topic_prefix);
+                let payload = if current_state.star_power_active {
+                    "ON"
+                } else {
+                    "OFF"
+                };
+                let _ = client.publish(&topic, payload.as_bytes(), false);
 
-            let event_topic = format!("{}/player1/event", config.topic_prefix);
-            let event_payload = if current_state.star_power_active {
-                "star_power_activated"
-            } else {
-                "star_power_deactivated"
-            };
-            let _ = client.publish(&event_topic, event_payload.as_bytes(), false);
+                let attr_topic = format!("{}/player1/star_power/attributes", config.topic_prefix);
+                let attr_json = serde_json::json!({
+                    "song": current_state.current_song,
+                    "difficulty": current_state.difficulty,
+                    "gauge": current_state.star_power_gauge,
+                    "streak": current_state.streak,
+                    "multiplier": current_state.effective_multiplier,
+                    "score": current_state.score,
+                    "notes_missed": current_state.notes_missed,
+                    "notes_hit": current_state.notes_hit,
+                    "is_paused": current_state.is_paused,
+                });
+                let _ = client.publish(&attr_topic, attr_json.to_string().as_bytes(), false);
+            }
 
-            let attr_topic = format!("{}/player1/star_power/attributes", config.topic_prefix);
-            let attr_json = serde_json::json!({
-                "song": current_state.current_song,
-                "difficulty": current_state.difficulty,
-                "gauge": current_state.star_power_gauge,
-                "streak": current_state.streak,
-                "multiplier": current_state.effective_multiplier,
-                "score": current_state.score,
-                "notes_missed": current_state.notes_missed,
-                "notes_hit": current_state.notes_hit,
-                "is_paused": current_state.is_paused,
-            });
-            let _ = client.publish(&attr_topic, attr_json.to_string().as_bytes(), false);
+            if config.sensors.events {
+                let event_topic = format!("{}/player1/event", config.topic_prefix);
+                let event_payload = if current_state.star_power_active {
+                    "star_power_activated"
+                } else {
+                    "star_power_deactivated"
+                };
+                let _ = client.publish(&event_topic, event_payload.as_bytes(), false);
+            }
 
             if config.debug_log {
                 log_msg(
@@ -361,71 +426,80 @@ fn worker_main() {
             }
         }
 
-        // 4. Star Power Gauge
-        let gauge_diff = (current_state.star_power_gauge - last_state.star_power_gauge).abs();
-        if gauge_diff >= config.gauge_threshold_pct
-            || (current_state.star_power_active != last_state.star_power_active)
-        {
-            let topic = format!("{}/player1/star_power/gauge", config.topic_prefix);
-            let payload = format!("{:.1}", current_state.star_power_gauge);
-            let _ = client.publish(&topic, payload.as_bytes(), false);
-        }
-
-        // 5. Streak Change & Missed Note Detection
-        if current_state.streak != last_state.streak {
-            let topic = format!("{}/player1/streak", config.topic_prefix);
-            let payload = current_state.streak.to_string();
-            let _ = client.publish(&topic, payload.as_bytes(), false);
-
-            // If streak dropped from > 0 down to 0 while playing a song, a note
-            // was missed / overstrummed!
-            if current_state.is_playing && last_state.streak > 0 && current_state.streak == 0 {
-                let event_topic = format!("{}/player1/event", config.topic_prefix);
-                let _ = client.publish(&event_topic, b"note_missed", false);
-                if config.debug_log {
-                    log_msg(
-                        &log_path,
-                        &format!("Note missed / streak broken! (was {})", last_state.streak),
-                    );
-                }
+        // 5. Star Power Gauge
+        if config.sensors.star_power_gauge {
+            let gauge_diff = (current_state.star_power_gauge - last_state.star_power_gauge).abs();
+            if gauge_diff >= config.gauge_threshold_pct
+                || (current_state.star_power_active != last_state.star_power_active)
+            {
+                let topic = format!("{}/player1/star_power/gauge", config.topic_prefix);
+                let payload = format!("{:.1}", current_state.star_power_gauge);
+                let _ = client.publish(&topic, payload.as_bytes(), false);
             }
         }
 
-        // 6. Notes Missed Counter Change
-        if current_state.notes_missed != last_state.notes_missed {
+        // 6. Streak Change & Missed Note Detection
+        let streak_broken =
+            current_state.is_playing && last_state.streak > 0 && current_state.streak == 0;
+        let notes_missed_increased =
+            current_state.is_playing && current_state.notes_missed > last_state.notes_missed;
+        let note_missed = streak_broken || notes_missed_increased;
+
+        if current_state.streak != last_state.streak {
+            if config.sensors.streak {
+                let topic = format!("{}/player1/streak", config.topic_prefix);
+                let payload = current_state.streak.to_string();
+                let _ = client.publish(&topic, payload.as_bytes(), false);
+            }
+
+            if streak_broken && config.debug_log {
+                log_msg(
+                    &log_path,
+                    &format!("Note missed / streak broken! (was {})", last_state.streak),
+                );
+            }
+        }
+
+        // Edge-triggered note_missed event
+        if config.sensors.note_missed_event && note_missed {
+            let event_topic = format!("{}/player1/event", config.topic_prefix);
+            let _ = client.publish(&event_topic, b"note_missed", false);
+        }
+
+        // 7. Notes Missed Counter Change
+        if config.sensors.notes_missed && current_state.notes_missed != last_state.notes_missed {
             let topic = format!("{}/player1/notes_missed", config.topic_prefix);
             let payload = current_state.notes_missed.to_string();
             let _ = client.publish(&topic, payload.as_bytes(), false);
-
-            if current_state.notes_missed > last_state.notes_missed {
-                let event_topic = format!("{}/player1/event", config.topic_prefix);
-                let _ = client.publish(&event_topic, b"note_missed", false);
-            }
         }
 
-        // 7. Notes Hit Counter Change
-        if current_state.notes_hit != last_state.notes_hit {
+        // 8. Notes Hit Counter Change
+        if config.sensors.notes_hit && current_state.notes_hit != last_state.notes_hit {
             let topic = format!("{}/player1/notes_hit", config.topic_prefix);
             let payload = current_state.notes_hit.to_string();
             let _ = client.publish(&topic, payload.as_bytes(), false);
         }
 
-        // 8. Multiplier Change
-        if current_state.effective_multiplier != last_state.effective_multiplier {
+        // 9. Multiplier Change
+        if config.sensors.multiplier
+            && current_state.effective_multiplier != last_state.effective_multiplier
+        {
             let topic = format!("{}/player1/multiplier", config.topic_prefix);
             let payload = current_state.effective_multiplier.to_string();
             let _ = client.publish(&topic, payload.as_bytes(), false);
         }
 
-        // 9. Total Score Change
-        if current_state.score != last_state.score {
+        // 10. Total Score Change
+        if config.sensors.score && current_state.score != last_state.score {
             let topic = format!("{}/player1/score", config.topic_prefix);
             let payload = current_state.score.to_string();
             let _ = client.publish(&topic, payload.as_bytes(), false);
         }
 
-        // 10. Periodic full state update (every 1 second)
-        if last_periodic_publish.elapsed() >= Duration::from_millis(1000) {
+        // 11. Periodic full state update (every 1 second)
+        if config.sensors.periodic_state
+            && last_periodic_publish.elapsed() >= Duration::from_millis(1000)
+        {
             let topic = format!("{}/player1/state", config.topic_prefix);
             if let Ok(json_bytes) = serde_json::to_vec(&current_state) {
                 let _ = client.publish(&topic, &json_bytes, false);

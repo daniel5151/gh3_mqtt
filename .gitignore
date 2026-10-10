@@ -2,3 +2,5 @@
 .agents
 *.log
 *.ini
+*.json
+gh3_mqtt.toml

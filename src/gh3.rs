@@ -311,11 +311,7 @@ impl MemoryView {
                 if words.is_empty() {
                     return None;
                 }
-                Some(
-                    String::from_utf16_lossy(&words)
-                        .trim()
-                        .to_string(),
-                )
+                Some(String::from_utf16_lossy(&words).trim().to_string())
             }
             _ => None,
         }
@@ -420,7 +416,8 @@ impl<'a> QbStructView<'a> {
 
     /// Reads a string value for `key`.
     pub fn get_string(&self, key: u32) -> Option<String> {
-        self.get_item(key).and_then(|item| self.mem.extract_string_from_item(&item))
+        self.get_item(key)
+            .and_then(|item| self.mem.extract_string_from_item(&item))
     }
 
     /// Resolves a nested `QbStruct` for `key`.
@@ -526,7 +523,11 @@ pub fn read_game_state(mem: &MemoryView) -> GameState {
     let p1_struct = mem
         .read_val::<u32>(ADDR_P1_STATUS_PTR)
         .and_then(|ptr| QbStructView::new(mem, ptr as usize))
-        .or_else(|| global_map.as_ref().and_then(|map| map.get_struct(KEY_PLAYER1_STATUS)));
+        .or_else(|| {
+            global_map
+                .as_ref()
+                .and_then(|map| map.get_struct(KEY_PLAYER1_STATUS))
+        });
 
     let Some(p1) = p1_struct else {
         return state;
@@ -676,86 +677,89 @@ pub fn read_song_info(mem: &MemoryView, global_map: Option<&GlobalMapView>) -> O
     Some(format!("Song 0x{:08X}", song_key))
 }
 
+#[rustfmt::skip]
+const KNOWN_SONGS: &[(u32, &str)] = &[
+    // Career / Setlist (Tier 1-8)
+    (qb_hash("slowride"),              "Slow Ride - Foghat"),
+    (qb_hash("talkdirtytome"),         "Talk Dirty to Me - Poison"),
+    (qb_hash("hitmewithyourbestshot"), "Hit Me with Your Best Shot - Pat Benatar"),
+    (qb_hash("storyofmylife"),         "Story of My Life - Social Distortion"),
+    (qb_hash("rocknrollallnite"),      "Rock and Roll All Nite - Kiss"),
+    (qb_hash("sabotage"),              "Sabotage - Beastie Boys"),
+    (qb_hash("mississippiqueen"),      "Mississippi Queen - Mountain"),
+    (qb_hash("schoolsout"),            "School's Out - Alice Cooper"),
+    (qb_hash("sunshineofyourlove"),    "Sunshine of Your Love - Cream"),
+    (qb_hash("barracuda"),             "Barracuda - Heart"),
+    (qb_hash("bullsonparade"),         "Bulls on Parade - Rage Against the Machine"),
+    (qb_hash("reptilia"),              "Reptilia - The Strokes"),
+    (qb_hash("whenyouwereyoung"),      "When You Were Young - The Killers"),
+    (qb_hash("missmurder"),            "Miss Murder - AFI"),
+    (qb_hash("theseeker"),             "The Seeker - The Who"),
+    (qb_hash("laydown"),               "Lay Down - Priestess"),
+    (qb_hash("paintitblack"),          "Paint It, Black - The Rolling Stones"),
+    (qb_hash("suckmykiss"),            "Suck My Kiss - Red Hot Chili Peppers"),
+    (qb_hash("paranoid"),              "Paranoid - Black Sabbath"),
+    (qb_hash("anarchyintheuk"),        "Anarchy in the U.K. - Sex Pistols"),
+    (qb_hash("koolthing"),             "Kool Thing - Sonic Youth"),
+    (qb_hash("mynameisjonas"),         "My Name Is Jonas - Weezer"),
+    (qb_hash("evenflow"),              "Even Flow - Pearl Jam"),
+    (qb_hash("citiesonflame"),         "Cities on Flame with Rock and Roll - Blue Öyster Cult"),
+    (qb_hash("holidayincambodia"),     "Holiday in Cambodia - Dead Kennedys"),
+    (qb_hash("rockulikeahurricane"),   "Rock You Like a Hurricane - Scorpions"),
+    (qb_hash("sameoldsonganddance"),   "Same Old Song and Dance - Aerosmith"),
+    (qb_hash("lagrange"),              "La Grange - ZZ Top"),
+    (qb_hash("welcometothejungle"),    "Welcome to the Jungle - Guns N' Roses"),
+    (qb_hash("blackmagicwoman"),       "Black Magic Woman - Santana"),
+    (qb_hash("blacksunshine"),         "Black Sunshine - White Zombie"),
+    (qb_hash("themetal"),              "The Metal - Tenacious D"),
+    (qb_hash("pridenjoy"),             "Pride and Joy - Stevie Ray Vaughan"),
+    (qb_hash("beforeiforget"),         "Before I Forget - Slipknot"),
+    (qb_hash("stricken"),              "Stricken - Disturbed"),
+    (qb_hash("monsters"),              "Monsters - Matchbook Romance"),
+    (qb_hash("threesandsevens"),       "3's & 7's - Queens of the Stone Age"),
+    (qb_hash("knightsofcydonia"),      "Knights of Cydonia - Muse"),
+    (qb_hash("cultofpersonality"),     "Cult of Personality - Living Colour"),
+    (qb_hash("rainingblood"),          "Raining Blood - Slayer"),
+    (qb_hash("cliffsofdover"),         "Cliffs of Dover - Eric Johnson"),
+    (qb_hash("numberofthebeast"),      "The Number of the Beast - Iron Maiden"),
+    (qb_hash("one"),                   "One - Metallica"),
+    (qb_hash("thrufireandflames"),     "Through the Fire and Flames - DragonForce"),
+
+    // Boss Battles
+    (qb_hash("bosstom"),               "Guitar Battle vs. Tom Morello - Tom Morello"),
+    (qb_hash("bossslash"),             "Guitar Battle vs. Slash - Slash"),
+    (qb_hash("bossdevil"),             "The Devil Went Down to Georgia - Steve Ouimette"),
+
+    // Bonus Tracks
+    (qb_hash("avalancha"),             "Avalancha - Héroes del Silencio"),
+    (qb_hash("bellyofashark"),         "In the Belly of a Shark - Gallows"),
+    (qb_hash("cantbesaved"),           "Can't Be Saved - Senses Fail"),
+    (qb_hash("closer"),                "Closer - Lacuna Coil"),
+    (qb_hash("dontholdback"),          "Don't Hold Back - The Sleeping"),
+    (qb_hash("downndirty"),            "Down 'N Dirty - LA Slum Lords"),
+    (qb_hash("fcpremix"),              "F.C.P.R.E.M.I.X. - The Fall of Troy"),
+    (qb_hash("generationrock"),        "Generation Rock - Revolverheld"),
+    (qb_hash("gothatfar"),             "Go That Far - Bret Michaels Band"),
+    (qb_hash("hierkommtalex"),         "Hier Kommt Alex - Die Toten Hosen"),
+    (qb_hash("imintheband"),           "I'm in the Band - The Hellacopters"),
+    (qb_hash("impulse"),               "Impulse - An Endless Sporadic"),
+    (qb_hash("inlove"),                "In Love - Scouts of St. Sebastian"),
+    (qb_hash("mauvaisgarcon"),         "Mauvais Garçon - Naast"),
+    (qb_hash("minuscelsius"),          "Minus Celsius - Backyard Babies"),
+    (qb_hash("mycurse"),               "My Curse - Killswitch Engage"),
+    (qb_hash("nothingformehere"),      "Nothing for Me Here - Dope"),
+    (qb_hash("prayeroftherefugee"),    "Prayer of the Refugee - Rise Against"),
+    (qb_hash("radiosong"),             "Radio Song - Superbus"),
+    (qb_hash("ruby"),                  "Ruby - Kaiser Chiefs"),
+    (qb_hash("shebangsadrum"),         "She Bangs the Drums - The Stone Roses"),
+    (qb_hash("takethislife"),          "Take This Life - In Flames"),
+    (qb_hash("thewayitends"),          "The Way It Ends - Prototype"),
+    (qb_hash("cherubrock"),            "Cherub Rock - The Smashing Pumpkins"),
+];
+
 pub fn known_song_name(key: u32) -> Option<&'static str> {
-    match key {
-        // Career / Setlist (Tier 1-8)
-        0xFC3DB2E8 => Some("Slow Ride - Foghat"),
-        0xD10828C8 => Some("Talk Dirty to Me - Poison"),
-        0x68E8ACF5 => Some("Hit Me with Your Best Shot - Pat Benatar"),
-        0x24E5E579 => Some("Story of My Life - Social Distortion"),
-        0xDA21ECBA => Some("Rock and Roll All Nite - Kiss"),
-        0x71B14112 => Some("Sabotage - Beastie Boys"),
-        0xB2BA98AD => Some("Mississippi Queen - Mountain"),
-        0x80540F4B => Some("School's Out - Alice Cooper"),
-        0x9CBFE5E3 => Some("Sunshine of Your Love - Cream"),
-        0xAEE0DC58 => Some("Barracuda - Heart"),
-        0xB3AE1B7A => Some("Bulls on Parade - Rage Against the Machine"),
-        0x233F951A => Some("Reptilia - The Strokes"),
-        0xE8BAF4E5 => Some("When You Were Young - The Killers"),
-        0x9AC28451 => Some("Miss Murder - AFI"),
-        0x5CA68A94 => Some("The Seeker - The Who"),
-        0x24541776 => Some("Lay Down - Priestess"),
-        0x614910AE => Some("Paint It, Black - The Rolling Stones"),
-        0x4A7D84EB => Some("Suck My Kiss - Red Hot Chili Peppers"),
-        0x9F667DE2 => Some("Paranoid - Black Sabbath"),
-        0xA86A21FF => Some("Anarchy in the U.K. - Sex Pistols"),
-        0x51AD6E8C => Some("Kool Thing - Sonic Youth"),
-        0xDDEBC0CE => Some("My Name Is Jonas - Weezer"),
-        0x80D135F1 => Some("Even Flow - Pearl Jam"),
-        0x2D77BC7D => Some("Cities on Flame with Rock and Roll - Blue Öyster Cult"),
-        0xF6A3347D => Some("Holiday in Cambodia - Dead Kennedys"),
-        0x2B3B8EC0 => Some("Rock You Like a Hurricane - Scorpions"),
-        0x4771DA76 => Some("Same Old Song and Dance - Aerosmith"),
-        0x700C4085 => Some("La Grange - ZZ Top"),
-        0x3ADA655D => Some("Welcome to the Jungle - Guns N' Roses"),
-        0x00D5E836 => Some("Black Magic Woman - Santana"),
-        0xA9F17F64 => Some("Black Sunshine - White Zombie"),
-        0x54E72043 => Some("The Metal - Tenacious D"),
-        0x8EBC7218 => Some("Pride and Joy - Stevie Ray Vaughan"),
-        0xE8AB11E2 => Some("Before I Forget - Slipknot"),
-        0xAD7C54BA => Some("Stricken - Disturbed"),
-        0x5E055837 => Some("Monsters - Matchbook Romance"),
-        0x52F25C10 => Some("3's & 7's - Queens of the Stone Age"),
-        0x335A5A9F => Some("Knights of Cydonia - Muse"),
-        0x23FC5B5F => Some("Cult of Personality - Living Colour"),
-        0x1CBD9BE7 => Some("Raining Blood - Slayer"),
-        0xCE75E130 => Some("Cliffs of Dover - Eric Johnson"),
-        0x4EE17225 => Some("The Number of the Beast - Iron Maiden"),
-        0x8593790E => Some("One - Metallica"),
-        0x40797ADD => Some("Through the Fire and Flames - DragonForce"),
-
-        // Boss Battles
-        0xC27EFFAE => Some("Guitar Battle vs. Tom Morello - Tom Morello"),
-        0xF372F551 => Some("Guitar Battle vs. Slash - Slash"),
-        0xF2937A7E => Some("The Devil Went Down to Georgia - Steve Ouimette"),
-
-        // Bonus Tracks
-        0xC88D7504 => Some("Avalancha - Héroes del Silencio"),
-        0x0F590888 => Some("In the Belly of a Shark - Gallows"),
-        0xA401F325 => Some("Can't Be Saved - Senses Fail"),
-        0x0FEC074A => Some("Closer - Lacuna Coil"),
-        0x2FCD2D86 => Some("Don't Hold Back - The Sleeping"),
-        0x17221CBD => Some("Down 'N Dirty - LA Slum Lords"),
-        0x1821171E => Some("F.C.P.R.E.M.I.X. - The Fall of Troy"),
-        0x725509F3 => Some("Generation Rock - Revolverheld"),
-        0x1A075876 => Some("Go That Far - Bret Michaels Band"),
-        0xC3189706 => Some("Hier Kommt Alex - Die Toten Hosen"),
-        0x6A9010DD => Some("I'm in the Band - The Hellacopters"),
-        0x15E308F4 => Some("Impulse - An Endless Sporadic"),
-        0x310246E3 => Some("In Love - Scouts of St. Sebastian"),
-        0x55D68BD3 => Some("Mauvais Garçon - Naast"),
-        0x55E6D8D4 => Some("Minus Celsius - Backyard Babies"),
-        0x48130F42 => Some("My Curse - Killswitch Engage"),
-        0x17C2BF3D => Some("Nothing for Me Here - Dope"),
-        0xB7F75EAB => Some("Prayer of the Refugee - Rise Against"),
-        0x822B4762 => Some("Radio Song - Superbus"),
-        0x33A522F2 => Some("Ruby - Kaiser Chiefs"),
-        0x468C655D => Some("She Bangs the Drums - The Stone Roses"),
-        0x348C4908 => Some("Take This Life - In Flames"),
-        0x2A49D730 => Some("The Way It Ends - Prototype"),
-        0x8CF2B87A => Some("Cherub Rock - The Smashing Pumpkins"),
-
-        _ => None,
-    }
+    KNOWN_SONGS
+        .iter()
+        .find(|(k, _)| *k == key)
+        .map(|(_, title)| *title)
 }
-

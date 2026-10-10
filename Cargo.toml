@@ -11,3 +11,79 @@ serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 windows = { version = "0.58", features = ["Win32_System_SystemServices", "Win32_System_LibraryLoader", "Win32_System_Memory", "Win32_Foundation"] }
 zerocopy = { version = "0.8.62", features = ["derive"] }
+
+# Lint list yoinked from https://github.com/microsoft/openvmm/blob/main/Cargo.toml
+
+[lints.rust]
+# Lint groups need a priority lower than individual lints so they get applied first.
+future_incompatible = { level = "deny", priority = -2 }
+rust_2018_idioms = { level = "warn", priority = -2 }
+
+unused_qualifications = "warn"
+missing_docs = "warn"
+
+unsafe_op_in_unsafe_fn = "forbid"
+
+[lints.clippy]
+allow_attributes = "warn"
+dbg_macro = "warn"
+debug_assert_with_mut_call = "warn"
+filter_map_next = "warn"
+fn_params_excessive_bools = "warn"
+implicit_clone = "warn"
+imprecise_flops = "warn"
+inefficient_to_string = "warn"
+linkedlist = "warn"
+lossy_float_literal = "warn"
+macro_use_imports = "warn"
+option_option = "warn"
+ptr_as_ptr = "warn"
+ptr_cast_constness = "warn"
+ref_as_ptr = "warn"
+ref_option_ref = "warn"
+rest_pat_in_fully_bound_structs = "warn"
+suboptimal_flops = "warn"
+undocumented_unsafe_blocks = "warn"
+unnecessary_box_returns = "warn"
+
+# Nested if / else if statements can be easier to read than an equivalent
+# flattened statements.
+collapsible_else_if = "allow"
+collapsible_if = "allow"
+collapsible_match = "allow"
+# There are types where it makes sense to define the length, but it can never
+# be empty. This lint is reasonable for container-like data-structures, but
+# makes less sense for hardware-backed data structures.
+len_without_is_empty = "allow"
+# While it's generally a good idea to derive / implement `Default` when
+# appropriate, there are many types in the HvLite codebase where a type has a
+# `new()` method, but no sensible "Default".
+new_without_default = "allow"
+# This is the #1 most commonly ignored lint for a reason (at least according
+# to [this famous issue](https://github.com/rust-lang/rust-clippy/issues/5418)
+# on the clippy GitHub repo)! There are plenty of perfectly reasonable
+# functions that require a large number of non-optional arguments,
+# particularly when working with low-level hardware APIs.
+too_many_arguments = "allow"
+# This is a heuristic based lint that isn't always appropriate. While it's
+# often a good to decompose complex types into more digestible chunks, there
+# are many cases where a one-off complex type is required, and suppressing
+# this lint will simply add line-noise.
+type_complexity = "allow"
+# This lint attempts to simplify usages of if let usage in a loop where only
+# one variant type is used. While somewhat useful, its suggestions can lead to
+# throwing away potentially useful error information in non-obvious ways.
+manual_flatten = "allow"
+# This lint warns about comparing boolean values in an `assert_eq!` statement when `assert!`
+# could be used instead. While shorter, the explicit comparison can be more obvious to read
+# in certain cases than unary operators with `assert!`.
+bool_assert_comparison = "allow"
+# This lint suggests collapsing Box::new(Foo::default()) into Box::default(). We often
+# prefer to specify types completely for local code clarity's sake.
+box_default = "allow"
+# Besides the misleading name (this lint also triggers on arrays), we believe that it
+# doesn't provide value. If a developer gets their type wrong they'll notice and fix it.
+# Sometimes you do want a list of a single range.
+single_range_in_vec_init = "allow"
+# This lint is purely style, and we are ok with inlined and uninlined format args.
+uninlined_format_args = "allow"

@@ -51,7 +51,7 @@ pub const KEY_STAR_POWER_AMOUNT: u32 = qb_hash("star_power_amount");
 pub const KEY_STAR_POWER_USABLE: u32 = qb_hash("star_power_usable");
 pub const KEY_CURRENT_RUN: u32 = qb_hash("current_run");
 pub const KEY_SCORE: u32 = qb_hash("score");
-#[allow(dead_code)]
+#[expect(dead_code)]
 pub const KEY_NUM_MULTIPLIER: u32 = qb_hash("num_multiplier");
 pub const KEY_CURRENT_HEALTH: u32 = qb_hash("current_health");
 pub const KEY_TOTAL_NOTES: u32 = qb_hash("total_notes");
@@ -135,7 +135,7 @@ pub struct QbMap {
 }
 
 impl QbMap {
-    #[allow(dead_code)]
+    #[expect(dead_code)]
     #[inline]
     pub fn item_type(&self) -> u8 {
         self.type_flags >> 1
@@ -216,7 +216,7 @@ impl MemoryView {
             VirtualQuery(
                 Some(ptr),
                 &mut mbi,
-                std::mem::size_of::<MEMORY_BASIC_INFORMATION>(),
+                size_of::<MEMORY_BASIC_INFORMATION>(),
             )
         };
         if res == 0 || mbi.State != MEM_COMMIT {
@@ -243,7 +243,7 @@ impl MemoryView {
             VirtualQuery(
                 Some(ptr),
                 &mut mbi,
-                std::mem::size_of::<MEMORY_BASIC_INFORMATION>(),
+                size_of::<MEMORY_BASIC_INFORMATION>(),
             )
         };
         if res == 0 || mbi.State != MEM_COMMIT {
@@ -263,7 +263,7 @@ impl MemoryView {
 
     /// Safely copies a value of type `T` from `addr` using zerocopy if readable.
     pub fn read_val<T: FromBytes>(&self, addr: usize) -> Option<T> {
-        let size = std::mem::size_of::<T>();
+        let size = size_of::<T>();
         if !self.is_readable(addr as *const c_void, size) {
             return None;
         }
@@ -304,8 +304,10 @@ impl MemoryView {
                 // SAFETY: addr was confirmed readable for at least u16_len * 2 bytes by readable_len.
                 let slice = unsafe { std::slice::from_raw_parts(addr as *const u8, u16_len * 2) };
                 let words: Vec<u16> = slice
-                    .chunks_exact(2)
-                    .map(|chunk| u16::from_le_bytes([chunk[0], chunk[1]]))
+                    .as_chunks::<2>()
+                    .0
+                    .iter()
+                    .map(|chunk| u16::from_le_bytes(*chunk))
                     .take_while(|&w| w != 0)
                     .collect();
                 if words.is_empty() {
@@ -369,7 +371,7 @@ impl<'a> QbStructView<'a> {
         let len = 1 << map.size;
         let mask = len - 1;
         let index = (key as usize) & mask;
-        let node_size = std::mem::size_of::<QbMapNode>();
+        let node_size = size_of::<QbMapNode>();
         let node_addr = (map.nodes as usize) + index * node_size;
         let mut node = self.mem.read_val::<QbMapNode>(node_addr)?;
         let mut count = 0;
@@ -605,7 +607,7 @@ pub fn resolve_difficulty(diff_key: u32) -> &'static str {
 }
 
 /// Resolves the current song title and artist from FastGH3 metadata or songlist properties.
-pub fn read_song_info(mem: &MemoryView, global_map: Option<&GlobalMapView>) -> Option<String> {
+pub fn read_song_info(mem: &MemoryView, global_map: Option<&GlobalMapView<'_>>) -> Option<String> {
     // 1. Check fastgh3_meta struct (FastGH3 custom songs)
     if let Some(meta) = global_map.and_then(|map| map.get_struct(KEY_FASTGH3_META)) {
         let title = meta.get_string(KEY_TITLE);

@@ -1,3 +1,5 @@
+//! Guitar Hero III MQTT integration plugin.
+
 mod config;
 mod discovery;
 mod gh3;
@@ -402,7 +404,6 @@ fn worker_main() {
 /// Must be invoked by the Windows dynamic linker with valid parameters during
 /// process/thread attach and detach lifecycle events.
 #[unsafe(no_mangle)]
-#[allow(non_snake_case)]
 pub unsafe extern "system" fn DllMain(
     hinst: HMODULE,
     reason: u32,

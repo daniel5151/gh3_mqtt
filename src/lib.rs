@@ -374,11 +374,10 @@ fn worker_main() {
         last_state = current_state;
 
         // Keepalive / Ping
-        if let Err(e) = client.ping_if_needed() {
-            if config.debug_log {
+        if let Err(e) = client.ping_if_needed()
+            && config.debug_log {
                 log_msg(&log_path, &format!("Ping error: {}. Will reconnect.", e));
             }
-        }
 
         thread::sleep(Duration::from_millis(config.poll_interval_ms));
     }
@@ -393,7 +392,13 @@ fn worker_main() {
     }
 }
 
-#[no_mangle]
+/// Standard Windows DLL entry point.
+///
+/// # Safety
+///
+/// Must be invoked by the Windows dynamic linker with valid parameters during
+/// process/thread attach and detach lifecycle events.
+#[unsafe(no_mangle)]
 #[allow(non_snake_case)]
 pub unsafe extern "system" fn DllMain(
     hinst: HMODULE,
@@ -402,7 +407,7 @@ pub unsafe extern "system" fn DllMain(
 ) -> i32 {
     match reason {
         DLL_PROCESS_ATTACH => {
-            let _ = DisableThreadLibraryCalls(hinst);
+            let _ = unsafe { DisableThreadLibraryCalls(hinst) };
             RUNNING.store(true, Ordering::SeqCst);
             thread::spawn(worker_main);
         }

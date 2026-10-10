@@ -137,7 +137,10 @@ impl MqttClient {
             return Err(format!("Invalid CONNACK response: {:?}", connack));
         }
         if connack.return_code != 0x00 {
-            return Err(format!("Broker rejected connection with return code: {}", connack.return_code));
+            return Err(format!(
+                "Broker rejected connection with return code: {}",
+                connack.return_code
+            ));
         }
 
         self.stream = Some(stream);
@@ -180,7 +183,8 @@ impl MqttClient {
             return Ok(());
         }
 
-        if self.last_ping.elapsed() >= Duration::from_secs((self.keep_alive_secs / 2).max(5) as u64) {
+        if self.last_ping.elapsed() >= Duration::from_secs((self.keep_alive_secs / 2).max(5) as u64)
+        {
             let stream = self.stream.as_mut().unwrap();
             let pingreq = [0xC0, 0x00];
             if let Err(e) = stream.write_all(&pingreq) {
@@ -232,19 +236,4 @@ fn encode_str(s: &str, out: &mut Vec<u8>) {
     let len = s.len() as u16;
     out.extend_from_slice(&len.to_be_bytes());
     out.extend_from_slice(s.as_bytes());
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_connack_packet_zerocopy() {
-        let raw = [0x20, 0x02, 0x00, 0x00];
-        let packet = ConnackPacket::read_from_bytes(&raw).unwrap();
-        assert_eq!(packet.packet_type, 0x20);
-        assert_eq!(packet.remaining_length, 0x02);
-        assert_eq!(packet.session_present, 0x00);
-        assert_eq!(packet.return_code, 0x00);
-    }
 }

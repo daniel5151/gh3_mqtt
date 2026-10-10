@@ -6,6 +6,37 @@ use windows::Win32::System::Memory::{
 };
 use zerocopy::{FromBytes, Immutable, IntoBytes, KnownLayout};
 
+const fn qb_hash(s: &str) -> u32 {
+    let bytes = s.as_bytes();
+    let mut crc: u32 = 0xFFFFFFFF;
+    let mut i = 0;
+    while i < bytes.len() {
+        let b = bytes[i];
+        let ch = match b {
+            b'A'..=b'Z' => b + 32,
+            b'/' => b'\\',
+            _ => b,
+        };
+        crc = crc32_byte(ch, crc);
+        i += 1;
+    }
+    crc
+}
+
+const fn crc32_byte(b: u8, crc: u32) -> u32 {
+    let mut c = (crc ^ (b as u32)) & 0xFF;
+    let mut i = 0;
+    while i < 8 {
+        c = if (c & 1) != 0 {
+            0xEDB88320 ^ (c >> 1)
+        } else {
+            c >> 1
+        };
+        i += 1;
+    }
+    c ^ (crc >> 8)
+}
+
 pub const ADDR_IS_PLAYING_SONG: usize = 0x00B4EB21;
 pub const ADDR_SONG_PAUSED: usize = 0x00B4E320;
 pub const ADDR_CURRENT_SONG_KEY: usize = 0x00A13314;
@@ -14,26 +45,31 @@ pub const ADDR_ITEM_MAP: usize = 0x00C03AA8;
 pub const ADDR_P1_STATUS_PTR: usize = 0x00A12FCC;
 pub const ADDR_SCORE_OBJECT: usize = 0x00A12FD0;
 
-pub const KEY_PLAYER1_STATUS: u32 = 0xD95930AC;
-pub const KEY_STAR_POWER_USED: u32 = 0x92BE3D33;
-pub const KEY_STAR_POWER_AMOUNT: u32 = 0x35DB08DE;
-pub const KEY_STAR_POWER_USABLE: u32 = 0xD37CE106;
-pub const KEY_CURRENT_RUN: u32 = 0xA675A409;
-pub const KEY_SCORE: u32 = 0xCD66C8AE;
+pub const KEY_PLAYER1_STATUS: u32 = qb_hash("player1_status");
+pub const KEY_STAR_POWER_USED: u32 = qb_hash("star_power_used");
+pub const KEY_STAR_POWER_AMOUNT: u32 = qb_hash("star_power_amount");
+pub const KEY_STAR_POWER_USABLE: u32 = qb_hash("star_power_usable");
+pub const KEY_CURRENT_RUN: u32 = qb_hash("current_run");
+pub const KEY_SCORE: u32 = qb_hash("score");
 #[allow(dead_code)]
-pub const KEY_NUM_MULTIPLIER: u32 = 0xD472162F;
-pub const KEY_CURRENT_HEALTH: u32 = 0x36EC0682;
-pub const KEY_TOTAL_NOTES: u32 = 0x3D96CF41;
-pub const KEY_NOTES_HIT: u32 = 0x4C0D1319;
+pub const KEY_NUM_MULTIPLIER: u32 = qb_hash("num_multiplier");
+pub const KEY_CURRENT_HEALTH: u32 = qb_hash("current_health");
+pub const KEY_TOTAL_NOTES: u32 = qb_hash("total_notes");
+pub const KEY_NOTES_HIT: u32 = qb_hash("notes_hit");
 
-pub const KEY_CURRENT_DIFFICULTY: u32 = 0x9B2F5962;
-pub const KEY_CURRENT_SONG: u32 = 0x03A17838;
-pub const KEY_FASTGH3_META: u32 = 0xCE4258D2;
-pub const KEY_GH3_SONGLIST_PROPS: u32 = 0x6F53CF2D;
-pub const KEY_PERMANENT_SONGLIST_PROPS: u32 = 0x5A93AE17;
-pub const KEY_TITLE: u32 = 0xD4C98794;
-pub const KEY_ARTIST: u32 = 0xFEA66978;
-pub const KEY_AUTHOR: u32 = 0x42502737;
+pub const KEY_CURRENT_DIFFICULTY: u32 = qb_hash("current_difficulty");
+pub const KEY_CURRENT_SONG: u32 = qb_hash("current_song");
+pub const KEY_FASTGH3_META: u32 = qb_hash("fastgh3_meta");
+pub const KEY_GH3_SONGLIST_PROPS: u32 = qb_hash("gh3_songlist_props");
+pub const KEY_PERMANENT_SONGLIST_PROPS: u32 = qb_hash("permanent_songlist_props");
+pub const KEY_TITLE: u32 = qb_hash("title");
+pub const KEY_ARTIST: u32 = qb_hash("artist");
+pub const KEY_AUTHOR: u32 = qb_hash("author");
+
+pub const KEY_EASY: u32 = qb_hash("easy");
+pub const KEY_MEDIUM: u32 = qb_hash("medium");
+pub const KEY_HARD: u32 = qb_hash("hard");
+pub const KEY_EXPERT: u32 = qb_hash("expert");
 
 #[repr(C)]
 #[derive(FromBytes, IntoBytes, KnownLayout, Immutable, Clone, Copy, Debug, PartialEq)]
@@ -145,33 +181,6 @@ impl Default for GameState {
             difficulty: "Expert".to_string(),
         }
     }
-}
-
-#[allow(dead_code)]
-pub fn qb_hash(s: &str) -> u32 {
-    let mut crc: u32 = 0xFFFFFFFF;
-    for &b in s.as_bytes() {
-        let ch = match b {
-            b'A'..=b'Z' => b + 32,
-            b'/' => b'\\',
-            _ => b,
-        };
-        crc = crc32_byte(ch, crc);
-    }
-    crc
-}
-
-#[allow(dead_code)]
-fn crc32_byte(b: u8, crc: u32) -> u32 {
-    let mut c = (crc ^ (b as u32)) & 0xFF;
-    for _ in 0..8 {
-        c = if (c & 1) != 0 {
-            0xEDB88320 ^ (c >> 1)
-        } else {
-            c >> 1
-        };
-    }
-    c ^ (crc >> 8)
 }
 
 pub unsafe fn is_readable(ptr: *const c_void, size: usize) -> bool {
@@ -422,10 +431,10 @@ pub unsafe fn read_game_state() -> GameState {
 
 pub fn resolve_difficulty(diff_key: u32) -> &'static str {
     match diff_key {
-        0xB69D6568 => "Easy",
-        0x398CBA48 => "Medium",
-        0x3EEAE02D => "Hard",
-        0xB0E46CBD => "Expert",
+        KEY_EASY => "Easy",
+        KEY_MEDIUM => "Medium",
+        KEY_HARD => "Hard",
+        KEY_EXPERT => "Expert",
         _ => "Expert",
     }
 }
@@ -790,31 +799,6 @@ mod tests {
         assert_eq!(item.key, KEY_STAR_POWER_AMOUNT);
         assert_eq!(f32::from_bits(item.value), 100.0);
         assert_eq!(item.next, 0);
-    }
-
-    #[test]
-    fn test_qb_hashes() {
-        assert_eq!(qb_hash("player1_status"), KEY_PLAYER1_STATUS);
-        assert_eq!(qb_hash("star_power_used"), KEY_STAR_POWER_USED);
-        assert_eq!(qb_hash("star_power_amount"), KEY_STAR_POWER_AMOUNT);
-        assert_eq!(qb_hash("star_power_usable"), KEY_STAR_POWER_USABLE);
-        assert_eq!(qb_hash("current_run"), KEY_CURRENT_RUN);
-        assert_eq!(qb_hash("current_health"), KEY_CURRENT_HEALTH);
-        assert_eq!(qb_hash("score"), KEY_SCORE);
-        assert_eq!(qb_hash("num_multiplier"), KEY_NUM_MULTIPLIER);
-        assert_eq!(qb_hash("total_notes"), KEY_TOTAL_NOTES);
-        assert_eq!(qb_hash("notes_hit"), KEY_NOTES_HIT);
-        assert_eq!(qb_hash("current_difficulty"), KEY_CURRENT_DIFFICULTY);
-        assert_eq!(qb_hash("current_song"), KEY_CURRENT_SONG);
-        assert_eq!(qb_hash("fastgh3_meta"), KEY_FASTGH3_META);
-        assert_eq!(qb_hash("gh3_songlist_props"), KEY_GH3_SONGLIST_PROPS);
-        assert_eq!(
-            qb_hash("permanent_songlist_props"),
-            KEY_PERMANENT_SONGLIST_PROPS
-        );
-        assert_eq!(qb_hash("title"), KEY_TITLE);
-        assert_eq!(qb_hash("artist"), KEY_ARTIST);
-        assert_eq!(qb_hash("author"), KEY_AUTHOR);
     }
 
     #[test]

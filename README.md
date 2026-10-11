@@ -2,6 +2,14 @@
 
 A lightweight plugin for **Guitar Hero III (PC / BetterGH3 / GH3+)** that monitors gameplay and Star Power state in real-time and broadcasts them over MQTT to drive Home Assistant automations (e.g. flashing smart lights when Star Power is active!).
 
+> [!NOTE]
+>
+> In case you can't tell by the emojis in the README, this this is 100% free range Gemini 3.8 vibe code.
+>
+> That said, if you check the git history - you'll find that I did take quite some time to un-slop it, and IMO, the code is now in solid shape, and what I would consider to be fairly idiomatic Rust.
+>
+> Not strictly necessary, given the "weekend shitpost" nature of this project... but hey - gotta still have _some_ pride in your dying craft, right?
+
 [![GitHub Release](https://img.shields.io/github/v/release/daniel5151/gh3_mqtt?logo=github&label=Release)](https://github.com/daniel5151/gh3_mqtt/releases/latest)
 [![Download gh3_mqtt.dll](https://img.shields.io/badge/download-gh3__mqtt.dll-success?logo=windows)](https://github.com/daniel5151/gh3_mqtt/releases/latest/download/gh3_mqtt.dll)
 

@@ -8,6 +8,7 @@ crate-type = ["cdylib"]
 
 [dependencies]
 anyhow = "1.0.104"
+bitflags = { version = "2.8", default-features = false }
 log = "0.4.34"
 serde = { version = "1.0", default-features = false, features = ["derive", "alloc"] }
 serde_json = { version = "1.0", default-features = false, features = ["alloc"] }

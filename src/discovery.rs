@@ -60,6 +60,8 @@ pub fn generate_ha_discovery_messages(
                 "state_topic": format!("{}/player1/star_power/state", topic_prefix),
                 "payload_on": "ON",
                 "payload_off": "OFF",
+                // Snapshot metadata (streak, score, etc.) attached to the Star Power trigger
+                // without requiring high-frequency (hifreq) per-note telemetry.
                 "json_attributes_topic": format!("{}/player1/star_power/attributes", topic_prefix),
                 "availability": in_game_availability,
                 "availability_mode": "all",

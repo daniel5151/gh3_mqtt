@@ -57,23 +57,62 @@ fn get_plugin_dir() -> PathBuf {
     }
 }
 
-fn publish_all_entities(client: &mut MqttClient, config: &Config, state: &GameState) {
-    let pfx = &config.topic_prefix;
+struct Publisher<'a> {
+    client: &'a mut MqttClient,
+    prefix: &'a str,
+}
+
+impl<'a> Publisher<'a> {
+    fn new(client: &'a mut MqttClient, prefix: &'a str) -> Self {
+        Self { client, prefix }
+    }
+
+    fn publish(&mut self, subtopic: &str, payload: impl ToString) {
+        self.publish_opts(subtopic, payload, false);
+    }
+
+    fn publish_retained(&mut self, subtopic: &str, payload: impl ToString) {
+        self.publish_opts(subtopic, payload, true);
+    }
+
+    fn publish_opts(&mut self, subtopic: &str, payload: impl ToString, retain: bool) {
+        let topic = format!("{}/{}", self.prefix, subtopic);
+        let payload = payload.to_string();
+        if let Err(e) = self.client.publish(&topic, payload.as_bytes(), retain) {
+            log::debug!("Failed to publish {subtopic}: {e:#}");
+        }
+    }
+}
+
+/// Builds the Home Assistant `json_attributes_topic` payload for
+/// `binary_sensor.gh3_star_power`.
+///
+/// This provides contextual snapshot metadata (current song, difficulty, gauge,
+/// streak, multiplier, score, notes missed/hit) attached directly to the Star
+/// Power activation trigger without requiring high-frequency (`hifreq = true`)
+/// per-note MQTT telemetry.
+fn star_power_attributes(state: &GameState) -> serde_json::Value {
+    serde_json::json!({
+        "song": state.current_song,
+        "difficulty": state.difficulty,
+        "gauge": state.star_power_gauge,
+        "streak": state.streak,
+        "multiplier": state.effective_multiplier,
+        "score": state.score,
+        "notes_missed": state.notes_missed,
+        "notes_hit": state.notes_hit,
+        "is_paused": state.is_paused,
+    })
+}
+
+fn publish_all_entities(publisher: &mut Publisher<'_>, config: &Config, state: &GameState) {
     let s = &config.sensors;
 
     // 1. Song Active Availability (playing / idle)
-    let song_active_payload: &[u8] = if state.is_playing {
-        b"playing"
-    } else {
-        b"idle"
-    };
-    if let Err(e) = client.publish(
-        &format!("{}/game/song_active", pfx),
-        song_active_payload,
-        true,
-    ) {
-        log::debug!("Failed to publish game/song_active: {e:#}");
-    }
+    publisher.publish_retained(
+        "game/song_active",
+        if state.is_playing { "playing" } else { "idle" },
+    );
 
     // 2. Game-level sensors (Song Title - Artist, Difficulty, Paused)
     if s.current_song {
@@ -82,123 +121,54 @@ fn publish_all_entities(client: &mut MqttClient, config: &Config, state: &GameSt
         } else {
             "Idle"
         };
-        if let Err(e) = client.publish(
-            &format!("{}/game/current_song", pfx),
-            song_text.as_bytes(),
-            false,
-        ) {
-            log::debug!("Failed to publish game/current_song: {e:#}");
-        }
+        publisher.publish("game/current_song", song_text);
     }
     if s.difficulty {
-        if let Err(e) = client.publish(
-            &format!("{}/game/difficulty", pfx),
-            state.difficulty.as_bytes(),
-            false,
-        ) {
-            log::debug!("Failed to publish game/difficulty: {e:#}");
-        }
+        publisher.publish("game/difficulty", &state.difficulty);
     }
     if s.paused {
-        let payload: &[u8] = if state.is_paused { b"ON" } else { b"OFF" };
-        if let Err(e) = client.publish(&format!("{}/game/paused/state", pfx), payload, false) {
-            log::debug!("Failed to publish game/paused/state: {e:#}");
-        }
+        publisher.publish(
+            "game/paused/state",
+            if state.is_paused { "ON" } else { "OFF" },
+        );
     }
 
     // 3. Gameplay sensors
     if s.star_power {
-        let payload: &[u8] = if state.star_power_active {
-            b"ON"
-        } else {
-            b"OFF"
-        };
-        if let Err(e) = client.publish(&format!("{}/player1/star_power/state", pfx), payload, false)
-        {
-            log::debug!("Failed to publish player1/star_power/state: {e:#}");
-        }
-        let attr_json = serde_json::json!({
-            "song": state.current_song,
-            "difficulty": state.difficulty,
-            "gauge": state.star_power_gauge,
-            "streak": state.streak,
-            "multiplier": state.effective_multiplier,
-            "score": state.score,
-            "notes_missed": state.notes_missed,
-            "notes_hit": state.notes_hit,
-            "is_paused": state.is_paused,
-        });
-        if let Err(e) = client.publish(
-            &format!("{}/player1/star_power/attributes", pfx),
-            attr_json.to_string().as_bytes(),
-            false,
-        ) {
-            log::debug!("Failed to publish player1/star_power/attributes: {e:#}");
-        }
+        publisher.publish(
+            "player1/star_power/state",
+            if state.star_power_active { "ON" } else { "OFF" },
+        );
+        publisher.publish(
+            "player1/star_power/attributes",
+            star_power_attributes(state),
+        );
     }
     if s.star_power_gauge {
-        let payload = format!("{:.1}", state.star_power_gauge);
-        if let Err(e) = client.publish(
-            &format!("{}/player1/star_power/gauge", pfx),
-            payload.as_bytes(),
-            false,
-        ) {
-            log::debug!("Failed to publish player1/star_power/gauge: {e:#}");
-        }
+        publisher.publish(
+            "player1/star_power/gauge",
+            format!("{:.1}", state.star_power_gauge),
+        );
     }
     if s.streak {
-        let payload = state.streak.to_string();
-        if let Err(e) = client.publish(
-            &format!("{}/player1/streak", pfx),
-            payload.as_bytes(),
-            false,
-        ) {
-            log::debug!("Failed to publish player1/streak: {e:#}");
-        }
+        publisher.publish("player1/streak", state.streak);
     }
     if s.multiplier {
-        let payload = state.effective_multiplier.to_string();
-        if let Err(e) = client.publish(
-            &format!("{}/player1/multiplier", pfx),
-            payload.as_bytes(),
-            false,
-        ) {
-            log::debug!("Failed to publish player1/multiplier: {e:#}");
-        }
+        publisher.publish("player1/multiplier", state.effective_multiplier);
     }
     if s.score {
-        let payload = state.score.to_string();
-        if let Err(e) = client.publish(&format!("{}/player1/score", pfx), payload.as_bytes(), false)
-        {
-            log::debug!("Failed to publish player1/score: {e:#}");
-        }
+        publisher.publish("player1/score", state.score);
     }
     if s.notes_missed {
-        let payload = state.notes_missed.to_string();
-        if let Err(e) = client.publish(
-            &format!("{}/player1/notes_missed", pfx),
-            payload.as_bytes(),
-            false,
-        ) {
-            log::debug!("Failed to publish player1/notes_missed: {e:#}");
-        }
+        publisher.publish("player1/notes_missed", state.notes_missed);
     }
     if s.notes_hit {
-        let payload = state.notes_hit.to_string();
-        if let Err(e) = client.publish(
-            &format!("{}/player1/notes_hit", pfx),
-            payload.as_bytes(),
-            false,
-        ) {
-            log::debug!("Failed to publish player1/notes_hit: {e:#}");
-        }
+        publisher.publish("player1/notes_hit", state.notes_hit);
     }
 
     if s.periodic_state {
-        if let Ok(json_bytes) = serde_json::to_vec(state) {
-            if let Err(e) = client.publish(&format!("{}/player1/state", pfx), &json_bytes, false) {
-                log::debug!("Failed to publish player1/state: {e:#}");
-            }
+        if let Ok(json) = serde_json::to_string(state) {
+            publisher.publish("player1/state", json);
         }
     }
 }
@@ -310,7 +280,8 @@ fn run_plugin() -> anyhow::Result<()> {
 
                     // Immediately publish initial values for all entities
                     let initial_state = gh3::read_game_state(&mem);
-                    publish_all_entities(&mut client, &config, &initial_state);
+                    let mut publisher = Publisher::new(&mut client, &config.topic_prefix);
+                    publish_all_entities(&mut publisher, &config, &initial_state);
                     last_state = initial_state;
                 }
                 Err(err) => {
@@ -330,28 +301,28 @@ fn run_plugin() -> anyhow::Result<()> {
         // Read current game state safely
         let current_state = gh3::read_game_state(&mem);
 
+        let mut publisher = Publisher::new(&mut client, &config.topic_prefix);
+
         // 1. Song Playing State Change
         if current_state.is_playing != last_state.is_playing {
-            let song_active_topic = format!("{}/game/song_active", config.topic_prefix);
-            let song_active_payload: &[u8] = if current_state.is_playing {
-                b"playing"
-            } else {
-                b"idle"
-            };
-            if let Err(e) = client.publish(&song_active_topic, song_active_payload, true) {
-                log::debug!("Failed to publish game/song_active: {e:#}");
-            }
+            publisher.publish_retained(
+                "game/song_active",
+                if current_state.is_playing {
+                    "playing"
+                } else {
+                    "idle"
+                },
+            );
 
             if config.sensors.events {
-                let event_topic = format!("{}/player1/event", config.topic_prefix);
-                let event_payload = if current_state.is_playing {
-                    "song_started"
-                } else {
-                    "song_ended"
-                };
-                if let Err(e) = client.publish(&event_topic, event_payload.as_bytes(), false) {
-                    log::debug!("Failed to publish player1/event: {e:#}");
-                }
+                publisher.publish(
+                    "player1/event",
+                    if current_state.is_playing {
+                        "song_started"
+                    } else {
+                        "song_ended"
+                    },
+                );
             }
 
             log::debug!(
@@ -362,16 +333,15 @@ fn run_plugin() -> anyhow::Result<()> {
                 current_state.is_paused
             );
 
-            publish_all_entities(&mut client, &config, &current_state);
+            publish_all_entities(&mut publisher, &config, &current_state);
         }
 
         // 2. Song Paused State Change
         if config.sensors.paused && current_state.is_paused != last_state.is_paused {
-            let topic = format!("{}/game/paused/state", config.topic_prefix);
-            let payload = if current_state.is_paused { "ON" } else { "OFF" };
-            if let Err(e) = client.publish(&topic, payload.as_bytes(), false) {
-                log::debug!("Failed to publish game/paused/state: {e:#}");
-            }
+            publisher.publish(
+                "game/paused/state",
+                if current_state.is_paused { "ON" } else { "OFF" },
+            );
 
             log::debug!(
                 "Game pause state changed: is_paused={}",
@@ -381,67 +351,47 @@ fn run_plugin() -> anyhow::Result<()> {
 
         // 3. Song or Difficulty Change
         if config.sensors.current_song && current_state.current_song != last_state.current_song {
-            let topic = format!("{}/game/current_song", config.topic_prefix);
-            let payload = if current_state.is_playing {
+            let song_text = if current_state.is_playing {
                 &current_state.current_song
             } else {
                 "Idle"
             };
-            if let Err(e) = client.publish(&topic, payload.as_bytes(), false) {
-                log::debug!("Failed to publish game/current_song: {e:#}");
-            }
+            publisher.publish("game/current_song", song_text);
 
-            log::debug!("Song name updated: current_song='{}'", payload);
+            log::debug!("Song name updated: current_song='{}'", song_text);
         }
 
         if config.sensors.difficulty && current_state.difficulty != last_state.difficulty {
-            let topic = format!("{}/game/difficulty", config.topic_prefix);
-            if let Err(e) = client.publish(&topic, current_state.difficulty.as_bytes(), false) {
-                log::debug!("Failed to publish game/difficulty: {e:#}");
-            }
+            publisher.publish("game/difficulty", &current_state.difficulty);
         }
 
         // 4. Star Power Active State Change
         if current_state.star_power_active != last_state.star_power_active {
             if config.sensors.star_power {
-                let topic = format!("{}/player1/star_power/state", config.topic_prefix);
-                let payload = if current_state.star_power_active {
-                    "ON"
-                } else {
-                    "OFF"
-                };
-                if let Err(e) = client.publish(&topic, payload.as_bytes(), false) {
-                    log::debug!("Failed to publish player1/star_power/state: {e:#}");
-                }
+                publisher.publish(
+                    "player1/star_power/state",
+                    if current_state.star_power_active {
+                        "ON"
+                    } else {
+                        "OFF"
+                    },
+                );
 
-                let attr_topic = format!("{}/player1/star_power/attributes", config.topic_prefix);
-                let attr_json = serde_json::json!({
-                    "song": current_state.current_song,
-                    "difficulty": current_state.difficulty,
-                    "gauge": current_state.star_power_gauge,
-                    "streak": current_state.streak,
-                    "multiplier": current_state.effective_multiplier,
-                    "score": current_state.score,
-                    "notes_missed": current_state.notes_missed,
-                    "notes_hit": current_state.notes_hit,
-                    "is_paused": current_state.is_paused,
-                });
-                if let Err(e) = client.publish(&attr_topic, attr_json.to_string().as_bytes(), false)
-                {
-                    log::debug!("Failed to publish player1/star_power/attributes: {e:#}");
-                }
+                publisher.publish(
+                    "player1/star_power/attributes",
+                    star_power_attributes(&current_state),
+                );
             }
 
             if config.sensors.events {
-                let event_topic = format!("{}/player1/event", config.topic_prefix);
-                let event_payload = if current_state.star_power_active {
-                    "star_power_activated"
-                } else {
-                    "star_power_deactivated"
-                };
-                if let Err(e) = client.publish(&event_topic, event_payload.as_bytes(), false) {
-                    log::debug!("Failed to publish player1/event: {e:#}");
-                }
+                publisher.publish(
+                    "player1/event",
+                    if current_state.star_power_active {
+                        "star_power_activated"
+                    } else {
+                        "star_power_deactivated"
+                    },
+                );
             }
 
             log::debug!(
@@ -459,11 +409,10 @@ fn run_plugin() -> anyhow::Result<()> {
             if gauge_diff >= config.gauge_threshold_pct
                 || (current_state.star_power_active != last_state.star_power_active)
             {
-                let topic = format!("{}/player1/star_power/gauge", config.topic_prefix);
-                let payload = format!("{:.1}", current_state.star_power_gauge);
-                if let Err(e) = client.publish(&topic, payload.as_bytes(), false) {
-                    log::debug!("Failed to publish player1/star_power/gauge: {e:#}");
-                }
+                publisher.publish(
+                    "player1/star_power/gauge",
+                    format!("{:.1}", current_state.star_power_gauge),
+                );
             }
         }
 
@@ -476,11 +425,7 @@ fn run_plugin() -> anyhow::Result<()> {
 
         if current_state.streak != last_state.streak {
             if config.sensors.streak {
-                let topic = format!("{}/player1/streak", config.topic_prefix);
-                let payload = current_state.streak.to_string();
-                if let Err(e) = client.publish(&topic, payload.as_bytes(), false) {
-                    log::debug!("Failed to publish player1/streak: {e:#}");
-                }
+                publisher.publish("player1/streak", current_state.streak);
             }
 
             if streak_broken {
@@ -490,59 +435,37 @@ fn run_plugin() -> anyhow::Result<()> {
 
         // Edge-triggered note_missed event
         if config.sensors.note_missed_event && note_missed {
-            let event_topic = format!("{}/player1/event", config.topic_prefix);
-            if let Err(e) = client.publish(&event_topic, b"note_missed", false) {
-                log::debug!("Failed to publish player1/event note_missed: {e:#}");
-            }
+            publisher.publish("player1/event", "note_missed");
         }
 
         // 7. Notes Missed Counter Change
         if config.sensors.notes_missed && current_state.notes_missed != last_state.notes_missed {
-            let topic = format!("{}/player1/notes_missed", config.topic_prefix);
-            let payload = current_state.notes_missed.to_string();
-            if let Err(e) = client.publish(&topic, payload.as_bytes(), false) {
-                log::debug!("Failed to publish player1/notes_missed: {e:#}");
-            }
+            publisher.publish("player1/notes_missed", current_state.notes_missed);
         }
 
         // 8. Notes Hit Counter Change
         if config.sensors.notes_hit && current_state.notes_hit != last_state.notes_hit {
-            let topic = format!("{}/player1/notes_hit", config.topic_prefix);
-            let payload = current_state.notes_hit.to_string();
-            if let Err(e) = client.publish(&topic, payload.as_bytes(), false) {
-                log::debug!("Failed to publish player1/notes_hit: {e:#}");
-            }
+            publisher.publish("player1/notes_hit", current_state.notes_hit);
         }
 
         // 9. Multiplier Change
         if config.sensors.multiplier
             && current_state.effective_multiplier != last_state.effective_multiplier
         {
-            let topic = format!("{}/player1/multiplier", config.topic_prefix);
-            let payload = current_state.effective_multiplier.to_string();
-            if let Err(e) = client.publish(&topic, payload.as_bytes(), false) {
-                log::debug!("Failed to publish player1/multiplier: {e:#}");
-            }
+            publisher.publish("player1/multiplier", current_state.effective_multiplier);
         }
 
         // 10. Total Score Change
         if config.sensors.score && current_state.score != last_state.score {
-            let topic = format!("{}/player1/score", config.topic_prefix);
-            let payload = current_state.score.to_string();
-            if let Err(e) = client.publish(&topic, payload.as_bytes(), false) {
-                log::debug!("Failed to publish player1/score: {e:#}");
-            }
+            publisher.publish("player1/score", current_state.score);
         }
 
         // 11. Periodic full state update (every 1 second)
         if config.sensors.periodic_state
             && last_periodic_publish.elapsed() >= Duration::from_millis(1000)
         {
-            let topic = format!("{}/player1/state", config.topic_prefix);
-            if let Ok(json_bytes) = serde_json::to_vec(&current_state) {
-                if let Err(e) = client.publish(&topic, &json_bytes, false) {
-                    log::debug!("Failed to publish player1/state: {e:#}");
-                }
+            if let Ok(json) = serde_json::to_string(&current_state) {
+                publisher.publish("player1/state", json);
             }
             last_periodic_publish = Instant::now();
         }
@@ -558,13 +481,9 @@ fn run_plugin() -> anyhow::Result<()> {
     }
 
     // Clean shutdown
-    if let Err(e) = client.publish(&availability_topic, b"offline", true) {
-        log::debug!("Failed to publish offline status on shutdown: {e:#}");
-    }
-    let song_active_topic = format!("{}/game/song_active", config.topic_prefix);
-    if let Err(e) = client.publish(&song_active_topic, b"idle", true) {
-        log::debug!("Failed to publish idle status on shutdown: {e:#}");
-    }
+    let mut publisher = Publisher::new(&mut client, &config.topic_prefix);
+    publisher.publish_retained("status", "offline");
+    publisher.publish_retained("game/song_active", "idle");
     client.disconnect();
     log::info!("GH3 MQTT Plugin stopped.");
     Ok(())

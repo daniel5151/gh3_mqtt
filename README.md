@@ -1,6 +1,9 @@
 # GH3 MQTT Plugin (`gh3_mqtt.dll`)
 
-A lightweight, zero-hitch native plugin for **Guitar Hero III (PC / BetterGH3 / GH3+)** written in **Rust** that monitors gameplay and Star Power state in real-time and broadcasts them over MQTT to drive Home Assistant automations (e.g. flashing smart lights when Star Power is active!).
+A lightweight plugin for **Guitar Hero III (PC / BetterGH3 / GH3+)** that monitors gameplay and Star Power state in real-time and broadcasts them over MQTT to drive Home Assistant automations (e.g. flashing smart lights when Star Power is active!).
+
+[![GitHub Release](https://img.shields.io/github/v/release/daniel5151/gh3_mqtt?logo=github&label=Release)](https://github.com/daniel5151/gh3_mqtt/releases/latest)
+[![Download gh3_mqtt.dll](https://img.shields.io/badge/download-gh3__mqtt.dll-success?logo=windows)](https://github.com/daniel5151/gh3_mqtt/releases/latest/download/gh3_mqtt.dll)
 
 ---
 
@@ -36,6 +39,15 @@ A lightweight, zero-hitch native plugin for **Guitar Hero III (PC / BetterGH3 / 
   - Non-blocking asynchronous network worker thread.
   - Zero hitching or stuttering during gameplay even on network drops or reconnects.
   - Safe memory page bounds checks before dereferencing game pointers.
+
+---
+
+## 📥 Installation
+
+1. **Download [`gh3_mqtt.dll`](https://github.com/daniel5151/gh3_mqtt/releases/latest/download/gh3_mqtt.dll)** from the [Latest GitHub Release](https://github.com/daniel5151/gh3_mqtt/releases/latest).
+2. Copy `gh3_mqtt.dll` into your Guitar Hero III `PLUGINS\` folder (e.g., `E:\Guitar Hero III\PLUGINS\` or alongside your BetterGH3 / GH3+ plugins).
+3. Create/edit `PLUGINS/gh3_mqtt.toml` to configure your MQTT broker connection (see [Configuration](#-configuration-pluginsgh3_mqtttoml) below).
+4. Launch Guitar Hero III!
 
 ---
 
@@ -98,9 +110,6 @@ To avoid flooding MQTT brokers and Home Assistant recorder databases with rapid 
 * Essential low-frequency state updates (`star_power` active, `current_song`, `difficulty`, `paused`, `song_started`/`ended`, `star_power_activated`/`deactivated`) are published.
 * Set **`hifreq = true`** at the top level to enable all high-frequency sensors and events at once.
 * Any individual sensor or event can be selectively toggled inside the `[sensors]` table by uncommenting its line (e.g. leaving `hifreq = false` while enabling `score = true`).
-* Config parsing is **strictly validated** via Serde (`#[serde(deny_unknown_fields)]`). If malformed TOML or unknown keys are detected, the plugin pops a Windows error dialog with details and halts cleanly rather than running with corrupted state.
-* When Home Assistant auto-discovery is enabled, disabled sensors are automatically unregistered from Home Assistant.
-
 
 ---
 
@@ -218,3 +227,4 @@ cd gh3_mqtt
 ```
 *Output size: **~132 KB** (~63% total reduction).*
 
+> **Tip:** If you prefer not to build from source, pre-compiled Ultra-Crunched binaries are available under [GitHub Releases](https://github.com/daniel5151/gh3_mqtt/releases).

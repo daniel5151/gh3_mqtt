@@ -1,0 +1,102 @@
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      clobber:
+        description: 'Overwrite release asset if release already exists'
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Build & Release Ultra-Crunched DLL
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Extract version from Cargo.toml
+        id: version
+        shell: pwsh
+        run: |
+          $content = Get-Content Cargo.toml -Raw
+          if ($content -match '(?m)^\[package\][\s\S]*?^version\s*=\s*"([^"]+)"') {
+              $ver = $Matches[1]
+          } else {
+              Write-Error "Could not parse version from Cargo.toml"
+              exit 1
+          }
+          $tag = "v$ver"
+          Write-Host "Detected version from Cargo.toml: $ver (tag: $tag)"
+          "version=$ver" >> $env:GITHUB_OUTPUT
+          "tag=$tag" >> $env:GITHUB_OUTPUT
+
+      - name: Check release status
+        id: check_release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $tag = "${{ steps.version.outputs.tag }}"
+          $clobber = "${{ inputs.clobber }}" -eq "true"
+
+          $releaseExists = $false
+          $releases = @(gh release list --json tagName -q ".[].tagName" 2>$null)
+          if ($releases -contains $tag) {
+              $releaseExists = $true
+          }
+          $global:LASTEXITCODE = 0
+          Write-Host "Release $tag exists on GitHub: $releaseExists"
+
+          if ($releaseExists) {
+              if ($clobber) {
+                  Write-Host "Release $tag already exists. Clobber is enabled: will update release assets."
+              } else {
+                  Write-Error "Release $tag already exists! Check the 'clobber' input to overwrite existing assets."
+                  exit 1
+              }
+          } else {
+              Write-Host "Release $tag does not exist. Proceeding with release creation."
+          }
+
+          "exists=$releaseExists" >> $env:GITHUB_OUTPUT
+          $global:LASTEXITCODE = 0
+
+      - name: Install Rust nightly toolchain
+        uses: dtolnay/rust-toolchain@nightly
+        with:
+          targets: i686-pc-windows-msvc
+          components: rust-src
+
+      - name: Build Ultra-Crunched DLL
+        shell: pwsh
+        run: |
+          .\build-min.ps1
+          if (-not (Test-Path "target\i686-pc-windows-msvc\release\gh3_mqtt.dll")) {
+              Write-Error "Build artifact target\i686-pc-windows-msvc\release\gh3_mqtt.dll not found!"
+              exit 1
+          }
+
+      - name: Publish GitHub Release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.version.outputs.tag }}
+          EXISTS: ${{ steps.check_release.outputs.exists }}
+        run: |
+          $artifact = "target\i686-pc-windows-msvc\release\gh3_mqtt.dll"
+
+          if ($env:EXISTS -eq "true") {
+              Write-Host "Uploading $artifact to existing release $env:TAG with clobber..."
+              gh release upload $env:TAG $artifact --clobber
+          } else {
+              Write-Host "Creating new release $env:TAG and uploading $artifact..."
+              gh release create $env:TAG $artifact --title "$env:TAG" --generate-notes
+          }

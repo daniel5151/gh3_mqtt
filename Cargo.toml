@@ -2,6 +2,7 @@
 name = "gh3_mqtt"
 version = "0.1.0"
 edition = "2024"
+repository = "https://github.com/daniel5151/gh3_mqtt"
 
 [lib]
 crate-type = ["cdylib"]

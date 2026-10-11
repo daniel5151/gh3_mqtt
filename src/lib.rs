@@ -14,6 +14,7 @@ use simplelog::ConfigBuilder;
 use simplelog::LevelFilter;
 use simplelog::WriteLogger;
 
+use std::ffi::c_void;
 use std::path::Path;
 use std::path::PathBuf;
 use std::sync::atomic::AtomicBool;
@@ -22,11 +23,13 @@ use std::thread;
 use std::time::Duration;
 use std::time::Instant;
 
+use windows::Win32::Foundation::CloseHandle;
 use windows::Win32::Foundation::HMODULE;
 use windows::Win32::Foundation::HWND;
 use windows::Win32::System::LibraryLoader::DisableThreadLibraryCalls;
 use windows::Win32::System::SystemServices::DLL_PROCESS_ATTACH;
 use windows::Win32::System::SystemServices::DLL_PROCESS_DETACH;
+use windows::Win32::System::Threading::CreateThread;
 use windows::Win32::UI::WindowsAndMessaging::MB_ICONERROR;
 use windows::Win32::UI::WindowsAndMessaging::MB_OK;
 use windows::Win32::UI::WindowsAndMessaging::MessageBoxW;
@@ -476,6 +479,18 @@ fn worker_main() {
     }
 }
 
+/// Trampoline entry point for `CreateThread`.
+///
+/// Runs outside the Windows Loader Lock once `DllMain` has returned.
+///
+/// # Safety
+///
+/// Invoked by Windows thread dispatch with C ABI calling convention.
+unsafe extern "system" fn worker_bootstrap(_param: *mut c_void) -> u32 {
+    worker_main();
+    0
+}
+
 /// Standard Windows DLL entry point.
 ///
 /// # Safety
@@ -483,24 +498,46 @@ fn worker_main() {
 /// Must be invoked by the Windows dynamic linker with valid parameters during
 /// process/thread attach and detach lifecycle events.
 #[unsafe(no_mangle)]
-pub unsafe extern "system" fn DllMain(
-    hinst: HMODULE,
-    reason: u32,
-    _reserved: *mut std::ffi::c_void,
-) -> i32 {
+pub unsafe extern "system" fn DllMain(hinst: HMODULE, reason: u32, _reserved: *mut c_void) -> i32 {
     match reason {
         DLL_PROCESS_ATTACH => {
-            // SAFETY: Safe to disable thread attach/detach calls as this DLL
-            // does not track thread state.
+            // SAFETY: Safe to disable thread attach/detach notifications as
+            // this DLL does not track thread state.
             let _ = unsafe { DisableThreadLibraryCalls(hinst) };
             RUNNING.store(true, Ordering::SeqCst);
-            thread::spawn(worker_main);
+
+            // SAFETY: worker_bootstrap matches LPTHREAD_START_ROUTINE ABI and
+            // does not dereference invalid pointers. CreateThread is called
+            // without thread synchronization to avoid Windows Loader Lock
+            // deadlocks.
+            let handle = unsafe {
+                CreateThread(
+                    None,
+                    0,
+                    Some(worker_bootstrap),
+                    None,
+                    Default::default(),
+                    None,
+                )
+            };
+
+            match handle {
+                Ok(h) => {
+                    // SAFETY: Closing the thread handle releases kernel handle
+                    // resources; it does not terminate the executing thread.
+                    let _ = unsafe { CloseHandle(h) };
+                    1
+                }
+                Err(_) => 0,
+            }
         }
         DLL_PROCESS_DETACH => {
             RUNNING.store(false, Ordering::SeqCst);
-            thread::sleep(Duration::from_millis(50));
+            // If _reserved is non-null, the process is terminating and other
+            // threads have already been terminated by the OS. Avoid sleeping
+            // or blocking.
+            1
         }
-        _ => {}
+        _ => 1,
     }
-    1
 }

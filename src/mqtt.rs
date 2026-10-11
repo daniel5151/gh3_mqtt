@@ -1,3 +1,6 @@
+//! Minimal MQTT 3.1.1 client implementation for Guitar Hero III telemetry.
+
+use anyhow::Context;
 use std::io::Read;
 use std::io::Write;
 use std::net::TcpStream;
@@ -9,15 +12,97 @@ use zerocopy::Immutable;
 use zerocopy::IntoBytes;
 use zerocopy::KnownLayout;
 
+/// Errors encountered during MQTT operations.
+#[derive(Debug, thiserror::Error)]
+pub enum MqttError {
+    /// Attempted an operation while not connected.
+    #[error("Not connected to MQTT broker")]
+    NotConnected,
+
+    /// Failed to resolve the broker hostname or port.
+    #[error("Failed to resolve broker address '{host}:{port}': {source}")]
+    ResolveAddress {
+        /// Configured broker hostname.
+        host: String,
+        /// Configured broker port.
+        port: u16,
+        /// Underlying socket resolution error.
+        #[source]
+        source: std::io::Error,
+    },
+
+    /// Failed to establish a TCP connection within timeout.
+    #[error("Could not connect to broker at {host}:{port}")]
+    ConnectionFailed {
+        /// Configured broker hostname.
+        host: String,
+        /// Configured broker port.
+        port: u16,
+    },
+
+    /// Received an invalid or malformed CONNACK packet.
+    #[error(
+        "Invalid CONNACK packet: expected packet_type=0x20 and remaining_length=2, got packet_type={packet_type:#04x}, len={remaining_length}"
+    )]
+    InvalidConnack {
+        /// Received packet type byte.
+        packet_type: u8,
+        /// Received remaining length byte.
+        remaining_length: u8,
+    },
+
+    /// Broker refused the connection.
+    #[error("Broker rejected connection with code {code} ({reason})")]
+    ConnectionRefused {
+        /// MQTT return code received from broker.
+        code: u8,
+        /// Human-readable explanation of return code.
+        reason: &'static str,
+    },
+
+    /// An underlying I/O error occurred.
+    #[error("MQTT I/O error: {0}")]
+    Io(#[from] std::io::Error),
+}
+
+impl MqttError {
+    /// Returns true if this error indicates an unrecoverable rejection by the
+    /// broker (such as protocol mismatch, bad client identifier, bad
+    /// credentials, or unauthorized).
+    pub fn is_fatal(&self) -> bool {
+        match self {
+            Self::ConnectionRefused { code, .. } => matches!(*code, 1 | 2 | 4 | 5),
+            _ => false,
+        }
+    }
+}
+
+fn connack_reason(code: u8) -> &'static str {
+    match code {
+        1 => "unacceptable protocol version",
+        2 => "identifier rejected",
+        3 => "server unavailable",
+        4 => "bad user name or password",
+        5 => "not authorized",
+        _ => "unknown return code",
+    }
+}
+
+/// MQTT 3.1.1 CONNACK packet fixed and variable header.
 #[repr(C)]
 #[derive(FromBytes, IntoBytes, KnownLayout, Immutable, Clone, Copy, Debug, PartialEq)]
 pub struct ConnackPacket {
+    /// Fixed header packet type (0x20).
     pub packet_type: u8,
+    /// Fixed header remaining length (0x02).
     pub remaining_length: u8,
+    /// Connect acknowledge flags (session present bit 0).
     pub session_present: u8,
+    /// Connect return code (0x00 for connection accepted).
     pub return_code: u8,
 }
 
+/// A lightweight, non-blocking MQTT 3.1.1 client.
 pub struct MqttClient {
     stream: Option<TcpStream>,
     host: String,
@@ -32,6 +117,7 @@ pub struct MqttClient {
 }
 
 impl MqttClient {
+    /// Creates a new `MqttClient` instance with connection parameters.
     pub fn new(
         host: String,
         port: u16,
@@ -55,15 +141,22 @@ impl MqttClient {
         }
     }
 
+    /// Checks whether an active TCP stream is currently open.
     pub fn is_connected(&self) -> bool {
         self.stream.is_some()
     }
 
-    pub fn connect(&mut self) -> Result<(), String> {
+    /// Establishes a TCP connection to the broker and performs the MQTT 3.1.1
+    /// CONNECT handshake.
+    pub fn connect(&mut self) -> Result<(), MqttError> {
         let addr = format!("{}:{}", self.host, self.port);
         let socket_addrs = addr
             .to_socket_addrs()
-            .map_err(|e| format!("Failed to resolve {}: {}", addr, e))?;
+            .map_err(|e| MqttError::ResolveAddress {
+                host: self.host.clone(),
+                port: self.port,
+                source: e,
+            })?;
 
         let mut connected_stream = None;
         for saddr in socket_addrs {
@@ -76,8 +169,10 @@ impl MqttClient {
             }
         }
 
-        let mut stream = connected_stream
-            .ok_or_else(|| format!("Could not connect to {}:{}", self.host, self.port))?;
+        let mut stream = connected_stream.ok_or_else(|| MqttError::ConnectionFailed {
+            host: self.host.clone(),
+            port: self.port,
+        })?;
 
         // Build MQTT 3.1.1 CONNECT packet
         let mut variable_header = Vec::new();
@@ -126,27 +221,30 @@ impl MqttClient {
         packet.extend_from_slice(&variable_header);
         packet.extend_from_slice(&payload);
 
-        stream
-            .write_all(&packet)
-            .map_err(|e| format!("Failed to send CONNECT: {}", e))?;
+        stream.write_all(&packet)?;
 
         // Read CONNACK response
         let mut connack_buf = [0u8; 4];
-        stream
-            .read_exact(&mut connack_buf)
-            .map_err(|e| format!("Failed to read CONNACK: {}", e))?;
+        stream.read_exact(&mut connack_buf)?;
 
-        let connack = ConnackPacket::read_from_bytes(&connack_buf)
-            .map_err(|e| format!("Failed to parse CONNACK: {}", e))?;
+        let connack = ConnackPacket::read_from_bytes(&connack_buf).map_err(|_| {
+            MqttError::InvalidConnack {
+                packet_type: connack_buf[0],
+                remaining_length: connack_buf[1],
+            }
+        })?;
 
         if connack.packet_type != 0x20 || connack.remaining_length != 0x02 {
-            return Err(format!("Invalid CONNACK response: {:?}", connack));
+            return Err(MqttError::InvalidConnack {
+                packet_type: connack.packet_type,
+                remaining_length: connack.remaining_length,
+            });
         }
         if connack.return_code != 0x00 {
-            return Err(format!(
-                "Broker rejected connection with return code: {}",
-                connack.return_code
-            ));
+            return Err(MqttError::ConnectionRefused {
+                code: connack.return_code,
+                reason: connack_reason(connack.return_code),
+            });
         }
 
         self.stream = Some(stream);
@@ -154,11 +252,9 @@ impl MqttClient {
         Ok(())
     }
 
-    pub fn publish(&mut self, topic: &str, payload: &[u8], retain: bool) -> Result<(), String> {
-        let stream = self
-            .stream
-            .as_mut()
-            .ok_or_else(|| "Not connected".to_string())?;
+    /// Publishes a QoS 0 payload to `topic`.
+    pub fn publish(&mut self, topic: &str, payload: &[u8], retain: bool) -> anyhow::Result<()> {
+        let stream = self.stream.as_mut().ok_or(MqttError::NotConnected)?;
 
         let mut variable_header = Vec::new();
         encode_str(topic, &mut variable_header);
@@ -178,13 +274,15 @@ impl MqttClient {
 
         if let Err(e) = stream.write_all(&packet) {
             self.stream = None;
-            return Err(format!("Publish failed: {}", e));
+            return Err(e).with_context(|| format!("Publish to topic '{}' failed", topic));
         }
 
         Ok(())
     }
 
-    pub fn ping_if_needed(&mut self) -> Result<(), String> {
+    /// Sends a PINGREQ packet if half the keep-alive interval has elapsed, and
+    /// drains responses.
+    pub fn ping_if_needed(&mut self) -> anyhow::Result<()> {
         if self.stream.is_none() {
             return Ok(());
         }
@@ -195,7 +293,7 @@ impl MqttClient {
             let pingreq = [0xC0, 0x00];
             if let Err(e) = stream.write_all(&pingreq) {
                 self.stream = None;
-                return Err(format!("Ping failed: {}", e));
+                return Err(e).context("Failed to write PINGREQ packet to MQTT broker");
             }
             self.last_ping = Instant::now();
         }
@@ -207,8 +305,10 @@ impl MqttClient {
                 Ok(_) => {}
                 Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {}
                 Err(ref e) if e.kind() == std::io::ErrorKind::TimedOut => {}
-                Err(_) => {
+                Err(e) => {
                     self.stream = None;
+                    return Err(e)
+                        .context("Failed to read from MQTT broker stream during keepalive");
                 }
             }
         }
@@ -216,6 +316,7 @@ impl MqttClient {
         Ok(())
     }
 
+    /// Sends a clean DISCONNECT packet and closes the underlying socket.
     pub fn disconnect(&mut self) {
         if let Some(mut stream) = self.stream.take() {
             let disconnect_packet = [0xE0, 0x00];

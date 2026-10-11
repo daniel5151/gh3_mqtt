@@ -2,30 +2,14 @@ use self::schema::RawConfig;
 use self::schema::RawSensorConfig;
 
 /// Errors encountered while parsing or validating plugin configuration.
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 pub enum ConfigError {
     /// A syntax or schema deserialization error occurred while parsing TOML.
-    Parse(toml::de::Error),
+    #[error("TOML syntax or schema error:\n{0}")]
+    Parse(#[from] toml::de::Error),
     /// A semantic validation error occurred (e.g. out-of-range value).
+    #[error("Validation error: {0}")]
     Validation(String),
-}
-
-impl std::fmt::Display for ConfigError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Parse(err) => write!(f, "TOML syntax or schema error:\n{}", err),
-            Self::Validation(msg) => write!(f, "Validation error: {}", msg),
-        }
-    }
-}
-
-impl std::error::Error for ConfigError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        match self {
-            Self::Parse(err) => Some(err),
-            Self::Validation(_) => None,
-        }
-    }
 }
 
 /// Sensor and telemetry reporting configuration.

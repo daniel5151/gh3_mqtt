@@ -5,13 +5,15 @@ mod discovery;
 mod gh3;
 mod mqtt;
 
+use anyhow::Context;
 use config::Config;
 use discovery::generate_ha_discovery_messages;
 use gh3::GameState;
 use mqtt::MqttClient;
+use simplelog::ConfigBuilder;
+use simplelog::LevelFilter;
+use simplelog::WriteLogger;
 
-use std::fs::OpenOptions;
-use std::io::Write;
 use std::path::Path;
 use std::path::PathBuf;
 use std::sync::atomic::AtomicBool;
@@ -47,13 +49,6 @@ fn show_error_box(title: &str, message: &str) {
     }
 }
 
-fn log_msg<P: AsRef<Path>>(log_path: P, msg: &str) {
-    if let Ok(mut file) = OpenOptions::new().create(true).append(true).open(log_path) {
-        let now = std::time::SystemTime::now();
-        let _ = writeln!(file, "[{:?}] {}", now, msg);
-    }
-}
-
 fn get_plugin_dir() -> PathBuf {
     if Path::new("PLUGINS").is_dir() {
         PathBuf::from("PLUGINS")
@@ -72,11 +67,13 @@ fn publish_all_entities(client: &mut MqttClient, config: &Config, state: &GameSt
     } else {
         b"idle"
     };
-    let _ = client.publish(
+    if let Err(e) = client.publish(
         &format!("{}/game/song_active", pfx),
         song_active_payload,
         true,
-    );
+    ) {
+        log::debug!("Failed to publish game/song_active: {e:#}");
+    }
 
     // 2. Game-level sensors (Song Title - Artist, Difficulty, Paused)
     if s.current_song {
@@ -85,38 +82,41 @@ fn publish_all_entities(client: &mut MqttClient, config: &Config, state: &GameSt
         } else {
             "Idle"
         };
-        let _ = client.publish(
+        if let Err(e) = client.publish(
             &format!("{}/game/current_song", pfx),
             song_text.as_bytes(),
             false,
-        );
+        ) {
+            log::debug!("Failed to publish game/current_song: {e:#}");
+        }
     }
     if s.difficulty {
-        let _ = client.publish(
+        if let Err(e) = client.publish(
             &format!("{}/game/difficulty", pfx),
             state.difficulty.as_bytes(),
             false,
-        );
+        ) {
+            log::debug!("Failed to publish game/difficulty: {e:#}");
+        }
     }
     if s.paused {
-        let _ = client.publish(
-            &format!("{}/game/paused/state", pfx),
-            if state.is_paused { b"ON" } else { b"OFF" },
-            false,
-        );
+        let payload: &[u8] = if state.is_paused { b"ON" } else { b"OFF" };
+        if let Err(e) = client.publish(&format!("{}/game/paused/state", pfx), payload, false) {
+            log::debug!("Failed to publish game/paused/state: {e:#}");
+        }
     }
 
     // 3. Gameplay sensors
     if s.star_power {
-        let _ = client.publish(
-            &format!("{}/player1/star_power/state", pfx),
-            if state.star_power_active {
-                b"ON"
-            } else {
-                b"OFF"
-            },
-            false,
-        );
+        let payload: &[u8] = if state.star_power_active {
+            b"ON"
+        } else {
+            b"OFF"
+        };
+        if let Err(e) = client.publish(&format!("{}/player1/star_power/state", pfx), payload, false)
+        {
+            log::debug!("Failed to publish player1/star_power/state: {e:#}");
+        }
         let attr_json = serde_json::json!({
             "song": state.current_song,
             "difficulty": state.difficulty,
@@ -128,119 +128,127 @@ fn publish_all_entities(client: &mut MqttClient, config: &Config, state: &GameSt
             "notes_hit": state.notes_hit,
             "is_paused": state.is_paused,
         });
-        let _ = client.publish(
+        if let Err(e) = client.publish(
             &format!("{}/player1/star_power/attributes", pfx),
             attr_json.to_string().as_bytes(),
             false,
-        );
+        ) {
+            log::debug!("Failed to publish player1/star_power/attributes: {e:#}");
+        }
     }
     if s.star_power_gauge {
-        let _ = client.publish(
+        let payload = format!("{:.1}", state.star_power_gauge);
+        if let Err(e) = client.publish(
             &format!("{}/player1/star_power/gauge", pfx),
-            format!("{:.1}", state.star_power_gauge).as_bytes(),
+            payload.as_bytes(),
             false,
-        );
+        ) {
+            log::debug!("Failed to publish player1/star_power/gauge: {e:#}");
+        }
     }
     if s.streak {
-        let _ = client.publish(
+        let payload = state.streak.to_string();
+        if let Err(e) = client.publish(
             &format!("{}/player1/streak", pfx),
-            state.streak.to_string().as_bytes(),
+            payload.as_bytes(),
             false,
-        );
+        ) {
+            log::debug!("Failed to publish player1/streak: {e:#}");
+        }
     }
     if s.multiplier {
-        let _ = client.publish(
+        let payload = state.effective_multiplier.to_string();
+        if let Err(e) = client.publish(
             &format!("{}/player1/multiplier", pfx),
-            state.effective_multiplier.to_string().as_bytes(),
+            payload.as_bytes(),
             false,
-        );
+        ) {
+            log::debug!("Failed to publish player1/multiplier: {e:#}");
+        }
     }
     if s.score {
-        let _ = client.publish(
-            &format!("{}/player1/score", pfx),
-            state.score.to_string().as_bytes(),
-            false,
-        );
+        let payload = state.score.to_string();
+        if let Err(e) = client.publish(&format!("{}/player1/score", pfx), payload.as_bytes(), false)
+        {
+            log::debug!("Failed to publish player1/score: {e:#}");
+        }
     }
     if s.notes_missed {
-        let _ = client.publish(
+        let payload = state.notes_missed.to_string();
+        if let Err(e) = client.publish(
             &format!("{}/player1/notes_missed", pfx),
-            state.notes_missed.to_string().as_bytes(),
+            payload.as_bytes(),
             false,
-        );
+        ) {
+            log::debug!("Failed to publish player1/notes_missed: {e:#}");
+        }
     }
     if s.notes_hit {
-        let _ = client.publish(
+        let payload = state.notes_hit.to_string();
+        if let Err(e) = client.publish(
             &format!("{}/player1/notes_hit", pfx),
-            state.notes_hit.to_string().as_bytes(),
+            payload.as_bytes(),
             false,
-        );
+        ) {
+            log::debug!("Failed to publish player1/notes_hit: {e:#}");
+        }
     }
 
     if s.periodic_state {
         if let Ok(json_bytes) = serde_json::to_vec(state) {
-            let _ = client.publish(&format!("{}/player1/state", pfx), &json_bytes, false);
+            if let Err(e) = client.publish(&format!("{}/player1/state", pfx), &json_bytes, false) {
+                log::debug!("Failed to publish player1/state: {e:#}");
+            }
         }
     }
 }
 
-fn load_config<P: AsRef<Path>>(path: P) -> Result<Config, String> {
+fn load_config<P: AsRef<Path>>(path: P) -> anyhow::Result<Config> {
     let path = path.as_ref();
     if !path.exists() {
-        std::fs::write(path, config::DEFAULT_TOML).map_err(|e| {
+        std::fs::write(path, config::DEFAULT_TOML).with_context(|| {
             format!(
-                "Could not create default configuration file '{}': {}",
-                path.display(),
-                e
+                "Could not create default configuration file '{}'",
+                path.display()
             )
         })?;
-        return Config::from_toml(config::DEFAULT_TOML).map_err(|e| e.to_string());
+        return Config::from_toml(config::DEFAULT_TOML)
+            .context("Failed to parse embedded default configuration");
     }
 
-    let content = std::fs::read_to_string(path).map_err(|e| {
+    let content = std::fs::read_to_string(path)
+        .with_context(|| format!("Could not read configuration file '{}'", path.display()))?;
+
+    Config::from_toml(&content)
+        .with_context(|| format!("Failed to parse configuration file '{}'", path.display()))
+}
+
+fn run_plugin() -> anyhow::Result<()> {
+    let plugin_dir = get_plugin_dir();
+    let toml_path = plugin_dir.join("gh3_mqtt.toml");
+
+    let config = load_config(&toml_path).with_context(|| {
         format!(
-            "Could not read configuration file '{}': {}",
-            path.display(),
-            e
+            "Failed to load configuration from '{}'",
+            toml_path.display()
         )
     })?;
 
-    Config::from_toml(&content).map_err(|e| e.to_string())
-}
-
-fn worker_main() {
-    let plugin_dir = get_plugin_dir();
-    let toml_path = plugin_dir.join("gh3_mqtt.toml");
-    let log_path = plugin_dir.join("gh3_mqtt.log");
-
-    let config = match load_config(&toml_path) {
-        Ok(c) => c,
-        Err(err) => {
-            let msg = format!(
-                "Failed to load configuration from '{}':\n\n{}",
-                toml_path.display(),
-                err
-            );
-            log_msg(&log_path, &format!("FATAL: {}", msg));
-            show_error_box("Guitar Hero III - MQTT Plugin Error", &msg);
-            return;
-        }
-    };
-
     if config.debug_log {
-        log_msg(&log_path, "GH3 MQTT Plugin starting up...");
-        log_msg(
-            &log_path,
-            &format!(
-                "Config loaded: broker={}:{}, prefix={}, poll={}ms, hifreq={}",
-                config.host,
-                config.port,
-                config.topic_prefix,
-                config.poll_interval_ms,
-                config.hifreq
-            ),
-        );
+        log::set_max_level(LevelFilter::Debug);
+    } else {
+        log::set_max_level(LevelFilter::Info);
     }
+
+    log::info!("GH3 MQTT Plugin starting up...");
+    log::info!(
+        "Config loaded: broker={}:{}, prefix={}, poll={}ms, hifreq={}",
+        config.host,
+        config.port,
+        config.topic_prefix,
+        config.poll_interval_ms,
+        config.hifreq
+    );
 
     let availability_topic = format!("{}/status", config.topic_prefix);
     let client_id = format!("gh3_pc_{:x}", std::process::id());
@@ -265,24 +273,20 @@ fn worker_main() {
 
     while RUNNING.load(Ordering::SeqCst) {
         if !client.is_connected() {
-            if config.debug_log {
-                log_msg(
-                    &log_path,
-                    &format!(
-                        "Connecting to MQTT broker at {}:{}...",
-                        config.host, config.port
-                    ),
-                );
-            }
+            log::debug!(
+                "Connecting to MQTT broker at {}:{}...",
+                config.host,
+                config.port
+            );
 
             match client.connect() {
                 Ok(_) => {
-                    if config.debug_log {
-                        log_msg(&log_path, "Connected to MQTT broker successfully!");
-                    }
+                    log::info!("Connected to MQTT broker successfully!");
 
                     // Publish availability = online (retained)
-                    let _ = client.publish(&availability_topic, b"online", true);
+                    if let Err(e) = client.publish(&availability_topic, b"online", true) {
+                        log::warn!("Failed to publish online availability: {e:#}");
+                    }
 
                     // Publish Home Assistant auto-discovery configs (retained)
                     if config.ha_discovery && !discovery_sent {
@@ -292,15 +296,16 @@ fn worker_main() {
                             &config.sensors,
                         );
                         for msg in msgs {
-                            let _ = client.publish(&msg.topic, msg.payload.as_bytes(), true);
+                            if let Err(e) = client.publish(&msg.topic, msg.payload.as_bytes(), true)
+                            {
+                                log::warn!(
+                                    "Failed to publish HA discovery message for '{}': {e:#}",
+                                    msg.topic
+                                );
+                            }
                         }
                         discovery_sent = true;
-                        if config.debug_log {
-                            log_msg(
-                                &log_path,
-                                "Home Assistant MQTT discovery payloads published.",
-                            );
-                        }
+                        log::debug!("Home Assistant MQTT discovery payloads published.");
                     }
 
                     // Immediately publish initial values for all entities
@@ -309,12 +314,13 @@ fn worker_main() {
                     last_state = initial_state;
                 }
                 Err(err) => {
-                    if config.debug_log {
-                        log_msg(
-                            &log_path,
-                            &format!("MQTT connect error: {}. Retrying...", err),
-                        );
+                    if err.is_fatal() {
+                        return Err(anyhow::Error::from(err).context(format!(
+                            "Fatal rejection by MQTT broker at {}:{}",
+                            config.host, config.port
+                        )));
                     }
+                    log::warn!("MQTT connect error: {err}. Retrying in 3 seconds...");
                     thread::sleep(Duration::from_millis(3000));
                     continue;
                 }
@@ -332,7 +338,9 @@ fn worker_main() {
             } else {
                 b"idle"
             };
-            let _ = client.publish(&song_active_topic, song_active_payload, true);
+            if let Err(e) = client.publish(&song_active_topic, song_active_payload, true) {
+                log::debug!("Failed to publish game/song_active: {e:#}");
+            }
 
             if config.sensors.events {
                 let event_topic = format!("{}/player1/event", config.topic_prefix);
@@ -341,21 +349,18 @@ fn worker_main() {
                 } else {
                     "song_ended"
                 };
-                let _ = client.publish(&event_topic, event_payload.as_bytes(), false);
+                if let Err(e) = client.publish(&event_topic, event_payload.as_bytes(), false) {
+                    log::debug!("Failed to publish player1/event: {e:#}");
+                }
             }
 
-            if config.debug_log {
-                log_msg(
-                    &log_path,
-                    &format!(
-                        "Song playing state changed: is_playing={}, song='{}', diff={}, paused={}",
-                        current_state.is_playing,
-                        current_state.current_song,
-                        current_state.difficulty,
-                        current_state.is_paused
-                    ),
-                );
-            }
+            log::debug!(
+                "Song playing state changed: is_playing={}, song='{}', diff={}, paused={}",
+                current_state.is_playing,
+                current_state.current_song,
+                current_state.difficulty,
+                current_state.is_paused
+            );
 
             publish_all_entities(&mut client, &config, &current_state);
         }
@@ -364,17 +369,14 @@ fn worker_main() {
         if config.sensors.paused && current_state.is_paused != last_state.is_paused {
             let topic = format!("{}/game/paused/state", config.topic_prefix);
             let payload = if current_state.is_paused { "ON" } else { "OFF" };
-            let _ = client.publish(&topic, payload.as_bytes(), false);
-
-            if config.debug_log {
-                log_msg(
-                    &log_path,
-                    &format!(
-                        "Game pause state changed: is_paused={}",
-                        current_state.is_paused
-                    ),
-                );
+            if let Err(e) = client.publish(&topic, payload.as_bytes(), false) {
+                log::debug!("Failed to publish game/paused/state: {e:#}");
             }
+
+            log::debug!(
+                "Game pause state changed: is_paused={}",
+                current_state.is_paused
+            );
         }
 
         // 3. Song or Difficulty Change
@@ -385,19 +387,18 @@ fn worker_main() {
             } else {
                 "Idle"
             };
-            let _ = client.publish(&topic, payload.as_bytes(), false);
-
-            if config.debug_log {
-                log_msg(
-                    &log_path,
-                    &format!("Song name updated: current_song='{}'", payload),
-                );
+            if let Err(e) = client.publish(&topic, payload.as_bytes(), false) {
+                log::debug!("Failed to publish game/current_song: {e:#}");
             }
+
+            log::debug!("Song name updated: current_song='{}'", payload);
         }
 
         if config.sensors.difficulty && current_state.difficulty != last_state.difficulty {
             let topic = format!("{}/game/difficulty", config.topic_prefix);
-            let _ = client.publish(&topic, current_state.difficulty.as_bytes(), false);
+            if let Err(e) = client.publish(&topic, current_state.difficulty.as_bytes(), false) {
+                log::debug!("Failed to publish game/difficulty: {e:#}");
+            }
         }
 
         // 4. Star Power Active State Change
@@ -409,7 +410,9 @@ fn worker_main() {
                 } else {
                     "OFF"
                 };
-                let _ = client.publish(&topic, payload.as_bytes(), false);
+                if let Err(e) = client.publish(&topic, payload.as_bytes(), false) {
+                    log::debug!("Failed to publish player1/star_power/state: {e:#}");
+                }
 
                 let attr_topic = format!("{}/player1/star_power/attributes", config.topic_prefix);
                 let attr_json = serde_json::json!({
@@ -423,7 +426,10 @@ fn worker_main() {
                     "notes_hit": current_state.notes_hit,
                     "is_paused": current_state.is_paused,
                 });
-                let _ = client.publish(&attr_topic, attr_json.to_string().as_bytes(), false);
+                if let Err(e) = client.publish(&attr_topic, attr_json.to_string().as_bytes(), false)
+                {
+                    log::debug!("Failed to publish player1/star_power/attributes: {e:#}");
+                }
             }
 
             if config.sensors.events {
@@ -433,21 +439,18 @@ fn worker_main() {
                 } else {
                     "star_power_deactivated"
                 };
-                let _ = client.publish(&event_topic, event_payload.as_bytes(), false);
+                if let Err(e) = client.publish(&event_topic, event_payload.as_bytes(), false) {
+                    log::debug!("Failed to publish player1/event: {e:#}");
+                }
             }
 
-            if config.debug_log {
-                log_msg(
-                    &log_path,
-                    &format!(
-                        "Star Power state changed: active={} (gauge={:.1}%, streak={}, mult={}x)",
-                        current_state.star_power_active,
-                        current_state.star_power_gauge,
-                        current_state.streak,
-                        current_state.effective_multiplier,
-                    ),
-                );
-            }
+            log::debug!(
+                "Star Power state changed: active={} (gauge={:.1}%, streak={}, mult={}x)",
+                current_state.star_power_active,
+                current_state.star_power_gauge,
+                current_state.streak,
+                current_state.effective_multiplier,
+            );
         }
 
         // 5. Star Power Gauge
@@ -458,7 +461,9 @@ fn worker_main() {
             {
                 let topic = format!("{}/player1/star_power/gauge", config.topic_prefix);
                 let payload = format!("{:.1}", current_state.star_power_gauge);
-                let _ = client.publish(&topic, payload.as_bytes(), false);
+                if let Err(e) = client.publish(&topic, payload.as_bytes(), false) {
+                    log::debug!("Failed to publish player1/star_power/gauge: {e:#}");
+                }
             }
         }
 
@@ -473,35 +478,40 @@ fn worker_main() {
             if config.sensors.streak {
                 let topic = format!("{}/player1/streak", config.topic_prefix);
                 let payload = current_state.streak.to_string();
-                let _ = client.publish(&topic, payload.as_bytes(), false);
+                if let Err(e) = client.publish(&topic, payload.as_bytes(), false) {
+                    log::debug!("Failed to publish player1/streak: {e:#}");
+                }
             }
 
-            if streak_broken && config.debug_log {
-                log_msg(
-                    &log_path,
-                    &format!("Note missed / streak broken! (was {})", last_state.streak),
-                );
+            if streak_broken {
+                log::debug!("Note missed / streak broken! (was {})", last_state.streak);
             }
         }
 
         // Edge-triggered note_missed event
         if config.sensors.note_missed_event && note_missed {
             let event_topic = format!("{}/player1/event", config.topic_prefix);
-            let _ = client.publish(&event_topic, b"note_missed", false);
+            if let Err(e) = client.publish(&event_topic, b"note_missed", false) {
+                log::debug!("Failed to publish player1/event note_missed: {e:#}");
+            }
         }
 
         // 7. Notes Missed Counter Change
         if config.sensors.notes_missed && current_state.notes_missed != last_state.notes_missed {
             let topic = format!("{}/player1/notes_missed", config.topic_prefix);
             let payload = current_state.notes_missed.to_string();
-            let _ = client.publish(&topic, payload.as_bytes(), false);
+            if let Err(e) = client.publish(&topic, payload.as_bytes(), false) {
+                log::debug!("Failed to publish player1/notes_missed: {e:#}");
+            }
         }
 
         // 8. Notes Hit Counter Change
         if config.sensors.notes_hit && current_state.notes_hit != last_state.notes_hit {
             let topic = format!("{}/player1/notes_hit", config.topic_prefix);
             let payload = current_state.notes_hit.to_string();
-            let _ = client.publish(&topic, payload.as_bytes(), false);
+            if let Err(e) = client.publish(&topic, payload.as_bytes(), false) {
+                log::debug!("Failed to publish player1/notes_hit: {e:#}");
+            }
         }
 
         // 9. Multiplier Change
@@ -510,14 +520,18 @@ fn worker_main() {
         {
             let topic = format!("{}/player1/multiplier", config.topic_prefix);
             let payload = current_state.effective_multiplier.to_string();
-            let _ = client.publish(&topic, payload.as_bytes(), false);
+            if let Err(e) = client.publish(&topic, payload.as_bytes(), false) {
+                log::debug!("Failed to publish player1/multiplier: {e:#}");
+            }
         }
 
         // 10. Total Score Change
         if config.sensors.score && current_state.score != last_state.score {
             let topic = format!("{}/player1/score", config.topic_prefix);
             let payload = current_state.score.to_string();
-            let _ = client.publish(&topic, payload.as_bytes(), false);
+            if let Err(e) = client.publish(&topic, payload.as_bytes(), false) {
+                log::debug!("Failed to publish player1/score: {e:#}");
+            }
         }
 
         // 11. Periodic full state update (every 1 second)
@@ -526,7 +540,9 @@ fn worker_main() {
         {
             let topic = format!("{}/player1/state", config.topic_prefix);
             if let Ok(json_bytes) = serde_json::to_vec(&current_state) {
-                let _ = client.publish(&topic, &json_bytes, false);
+                if let Err(e) = client.publish(&topic, &json_bytes, false) {
+                    log::debug!("Failed to publish player1/state: {e:#}");
+                }
             }
             last_periodic_publish = Instant::now();
         }
@@ -534,22 +550,60 @@ fn worker_main() {
         last_state = current_state;
 
         // Keepalive / Ping
-        if let Err(e) = client.ping_if_needed()
-            && config.debug_log
-        {
-            log_msg(&log_path, &format!("Ping error: {}. Will reconnect.", e));
+        if let Err(e) = client.ping_if_needed() {
+            log::warn!("Ping error: {e:#}. Will reconnect.");
         }
 
         thread::sleep(Duration::from_millis(config.poll_interval_ms));
     }
 
     // Clean shutdown
-    let _ = client.publish(&availability_topic, b"offline", true);
+    if let Err(e) = client.publish(&availability_topic, b"offline", true) {
+        log::debug!("Failed to publish offline status on shutdown: {e:#}");
+    }
     let song_active_topic = format!("{}/game/song_active", config.topic_prefix);
-    let _ = client.publish(&song_active_topic, b"idle", true);
+    if let Err(e) = client.publish(&song_active_topic, b"idle", true) {
+        log::debug!("Failed to publish idle status on shutdown: {e:#}");
+    }
     client.disconnect();
-    if config.debug_log {
-        log_msg(&log_path, "GH3 MQTT Plugin stopped.");
+    log::info!("GH3 MQTT Plugin stopped.");
+    Ok(())
+}
+
+fn init_logger<P: AsRef<Path>>(log_path: P) -> anyhow::Result<()> {
+    let file = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(log_path)
+        .context("Failed to open plugin log file")?;
+
+    let log_config = ConfigBuilder::new()
+        .set_target_level(LevelFilter::Off)
+        .set_thread_level(LevelFilter::Off)
+        .build();
+
+    let _ = WriteLogger::init(LevelFilter::Debug, log_config, file);
+    Ok(())
+}
+
+fn worker_main() {
+    let plugin_dir = get_plugin_dir();
+    let log_path = plugin_dir.join("gh3_mqtt.log");
+    if let Err(err) = init_logger(&log_path) {
+        show_error_box(
+            "Guitar Hero III - MQTT Plugin Error",
+            &format!("Failed to initialize plugin logger:\n\n{err:#}"),
+        );
+        return;
+    }
+
+    if let Err(err) = run_plugin() {
+        log::error!("Fatal error encountered in GH3 MQTT plugin: {err:#}");
+        show_error_box(
+            "Guitar Hero III - MQTT Plugin Error",
+            &format!("GH3 MQTT Plugin encountered a fatal error and has stopped:\n\n{err:#}"),
+        );
+        RUNNING.store(false, Ordering::SeqCst);
     }
 }
 

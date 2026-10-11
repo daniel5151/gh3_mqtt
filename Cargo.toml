@@ -7,8 +7,12 @@ edition = "2024"
 crate-type = ["cdylib"]
 
 [dependencies]
+anyhow = "1.0.104"
+log = "0.4.34"
 serde = { version = "1.0", default-features = false, features = ["derive", "alloc"] }
 serde_json = { version = "1.0", default-features = false, features = ["alloc"] }
+simplelog = "0.12.2"
+thiserror = "2.0.21"
 toml = { version = "0.8", default-features = false, features = ["parse", "display"] }
 windows = { version = "0.58", features = ["Win32_System_SystemServices", "Win32_System_LibraryLoader", "Win32_System_Memory", "Win32_Foundation", "Win32_UI_WindowsAndMessaging"] }
 zerocopy = { version = "0.8.62", features = ["derive"] }

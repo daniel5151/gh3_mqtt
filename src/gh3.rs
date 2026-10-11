@@ -115,6 +115,34 @@ impl QbStructItem {
     fn item_type(&self) -> u8 {
         self.flags >> 1
     }
+
+    #[inline]
+    fn as_bool(&self) -> bool {
+        self.value != 0
+    }
+
+    #[inline]
+    fn as_u32(&self) -> u32 {
+        self.value
+    }
+
+    #[inline]
+    fn as_f32(&self) -> f32 {
+        match self.item_type() {
+            2 => f32::from_bits(self.value),
+            1 => self.value as f32,
+            _ => 0.0,
+        }
+    }
+
+    #[inline]
+    fn as_score(&self) -> u32 {
+        if self.item_type() == 2 {
+            f32::from_bits(self.value).max(0.0) as u32
+        } else {
+            self.value
+        }
+    }
 }
 
 #[repr(C)]
@@ -192,9 +220,8 @@ impl Default for GameState {
 /// A safe accessor for reading process memory within the Guitar Hero III
 /// address space.
 #[derive(Clone, Copy, Debug)]
-pub struct MemoryView {
-    _private: (),
-}
+#[non_exhaustive]
+pub struct MemoryView;
 
 impl MemoryView {
     /// Constructs a `MemoryView` for the current process.
@@ -204,7 +231,7 @@ impl MemoryView {
     /// The caller must ensure that this is executed within the address space of
     /// a running Guitar Hero III process.
     pub const unsafe fn new() -> Self {
-        Self { _private: () }
+        Self
     }
 
     /// Checks if the memory range `[ptr, ptr + size)` is currently committed
@@ -406,22 +433,21 @@ impl<'a> QbStructView<'a> {
     }
 
     /// Reads a `u32` value for `key`.
+    #[expect(dead_code)]
     fn get_u32(&self, key: u32) -> Option<u32> {
-        self.get_item(key).map(|item| item.value)
+        self.get_item(key).map(|item| item.as_u32())
     }
 
     /// Reads a boolean value for `key`.
+    #[expect(dead_code)]
     fn get_bool(&self, key: u32) -> Option<bool> {
-        self.get_item(key).map(|item| item.value != 0)
+        self.get_item(key).map(|item| item.as_bool())
     }
 
     /// Reads an `f32` (or integer converted to `f32`) for `key`.
+    #[expect(dead_code)]
     fn get_f32(&self, key: u32) -> Option<f32> {
-        self.get_item(key).map(|item| match item.item_type() {
-            2 => f32::from_bits(item.value),
-            1 => item.value as f32,
-            _ => 0.0,
-        })
+        self.get_item(key).map(|item| item.as_f32())
     }
 
     /// Reads a string value for `key`.
@@ -438,13 +464,119 @@ impl<'a> QbStructView<'a> {
 
     /// Resolves score value, handling both integer and float representation.
     fn get_score(&self) -> Option<u32> {
-        self.get_item(KEY_SCORE).map(|item| {
-            if item.item_type() == 2 {
-                f32::from_bits(item.value).max(0.0) as u32
-            } else {
-                item.value
+        self.get_item(KEY_SCORE).map(|item| item.as_score())
+    }
+
+    /// Extracts player 1 gameplay metrics in a single traversal of the struct
+    /// linked list instead of walking it repeatedly for each metric.
+    fn populate_player_status(&self, state: &mut GameState) {
+        let Some(st) = self.mem.read_val::<QbStruct>(self.addr) else {
+            return;
+        };
+        let mut item_addr = st.first as usize;
+        let mut count = 0;
+        let mut found_mask = 0u8;
+        const MASK_ALL: u8 = 0b1111_1111;
+
+        let mut map_addr = 0;
+
+        while item_addr != 0 && count < 300 {
+            let Some(item) = self.mem.read_val::<QbStructItem>(item_addr) else {
+                break;
+            };
+
+            if item.item_type() == 0x1B {
+                map_addr = item.value as usize;
             }
-        })
+
+            match item.key {
+                KEY_STAR_POWER_USED => {
+                    state.star_power_active = item.as_bool();
+                    found_mask |= 1 << 0;
+                }
+                KEY_STAR_POWER_AMOUNT => {
+                    state.star_power_gauge = item.as_f32().clamp(0.0, 100.0);
+                    found_mask |= 1 << 1;
+                }
+                KEY_STAR_POWER_USABLE => {
+                    state.star_power_usable = item.as_bool();
+                    found_mask |= 1 << 2;
+                }
+                KEY_CURRENT_RUN => {
+                    state.streak = item.as_u32();
+                    found_mask |= 1 << 3;
+                }
+                KEY_SCORE => {
+                    state.score = item.as_score();
+                    found_mask |= 1 << 4;
+                }
+                KEY_CURRENT_HEALTH => {
+                    state.rock_meter = item.as_f32();
+                    found_mask |= 1 << 5;
+                }
+                KEY_NOTES_HIT => {
+                    state.notes_hit = item.as_u32();
+                    found_mask |= 1 << 6;
+                }
+                KEY_TOTAL_NOTES => {
+                    state.total_notes = item.as_u32();
+                    found_mask |= 1 << 7;
+                }
+                _ => {}
+            }
+
+            if found_mask == MASK_ALL {
+                break;
+            }
+
+            item_addr = item.next as usize;
+            count += 1;
+        }
+
+        // Fallback: If any fields weren't found in the primary linked list,
+        // search the nested QbMap (if present) for missing items.
+        if found_mask != MASK_ALL && map_addr != 0 {
+            if (found_mask & (1 << 0)) == 0
+                && let Some(item) = self.find_in_map(map_addr, KEY_STAR_POWER_USED)
+            {
+                state.star_power_active = item.as_bool();
+            }
+            if (found_mask & (1 << 1)) == 0
+                && let Some(item) = self.find_in_map(map_addr, KEY_STAR_POWER_AMOUNT)
+            {
+                state.star_power_gauge = item.as_f32().clamp(0.0, 100.0);
+            }
+            if (found_mask & (1 << 2)) == 0
+                && let Some(item) = self.find_in_map(map_addr, KEY_STAR_POWER_USABLE)
+            {
+                state.star_power_usable = item.as_bool();
+            }
+            if (found_mask & (1 << 3)) == 0
+                && let Some(item) = self.find_in_map(map_addr, KEY_CURRENT_RUN)
+            {
+                state.streak = item.as_u32();
+            }
+            if (found_mask & (1 << 4)) == 0
+                && let Some(item) = self.find_in_map(map_addr, KEY_SCORE)
+            {
+                state.score = item.as_score();
+            }
+            if (found_mask & (1 << 5)) == 0
+                && let Some(item) = self.find_in_map(map_addr, KEY_CURRENT_HEALTH)
+            {
+                state.rock_meter = item.as_f32();
+            }
+            if (found_mask & (1 << 6)) == 0
+                && let Some(item) = self.find_in_map(map_addr, KEY_NOTES_HIT)
+            {
+                state.notes_hit = item.as_u32();
+            }
+            if (found_mask & (1 << 7)) == 0
+                && let Some(item) = self.find_in_map(map_addr, KEY_TOTAL_NOTES)
+            {
+                state.total_notes = item.as_u32();
+            }
+        }
     }
 }
 
@@ -550,22 +682,8 @@ pub fn read_game_state(mem: &MemoryView) -> GameState {
         return state;
     };
 
-    // 7. Extract player1_status fields
-    if let Some(val) = p1.get_bool(KEY_STAR_POWER_USED) {
-        state.star_power_active = val;
-    }
-
-    if let Some(gauge) = p1.get_f32(KEY_STAR_POWER_AMOUNT) {
-        state.star_power_gauge = gauge.clamp(0.0, 100.0);
-    }
-
-    if let Some(usable) = p1.get_bool(KEY_STAR_POWER_USABLE) {
-        state.star_power_usable = usable;
-    }
-
-    if let Some(run) = p1.get_u32(KEY_CURRENT_RUN) {
-        state.streak = run;
-    }
+    // 7. Extract player1_status fields in a single traversal
+    p1.populate_player_status(&mut state);
 
     // Multiplier climbs 1x -> 2x -> 3x -> 4x with streak (0-9, 10-19, 20-29,
     // 30+ notes) Doubles to 2x, 4x, 6x, 8x during Star Power!
@@ -582,28 +700,13 @@ pub fn read_game_state(mem: &MemoryView) -> GameState {
         base_mult
     };
 
-    // Read score from player1_status, fallback to ADDR_SCORE_OBJECT
-    if let Some(score) = p1.get_score() {
-        state.score = score;
-    }
+    // Fallback to ADDR_SCORE_OBJECT if score was not present in player1_status
     if state.score == 0
         && let Some(score_obj_ptr) = mem.read_val::<u32>(ADDR_SCORE_OBJECT)
         && let Some(score_obj) = QbStructView::new(mem, score_obj_ptr as usize)
         && let Some(score) = score_obj.get_score()
     {
         state.score = score;
-    }
-
-    if let Some(health) = p1.get_f32(KEY_CURRENT_HEALTH) {
-        state.rock_meter = health;
-    }
-
-    if let Some(hit) = p1.get_u32(KEY_NOTES_HIT) {
-        state.notes_hit = hit;
-    }
-
-    if let Some(total) = p1.get_u32(KEY_TOTAL_NOTES) {
-        state.total_notes = total;
     }
 
     state.notes_missed = state.total_notes.saturating_sub(state.notes_hit);

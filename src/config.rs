@@ -1,14 +1,9 @@
-use std::fs;
-use std::path::Path;
-
 use self::schema::RawConfig;
 use self::schema::RawSensorConfig;
 
-/// Errors encountered while loading or validating plugin configuration.
+/// Errors encountered while parsing or validating plugin configuration.
 #[derive(Debug)]
 pub enum ConfigError {
-    /// An I/O error occurred while reading the configuration file.
-    Io(std::io::Error),
     /// A syntax or schema deserialization error occurred while parsing TOML.
     Parse(toml::de::Error),
     /// A semantic validation error occurred (e.g. out-of-range value).
@@ -18,7 +13,6 @@ pub enum ConfigError {
 impl std::fmt::Display for ConfigError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::Io(err) => write!(f, "I/O error: {}", err),
             Self::Parse(err) => write!(f, "TOML syntax or schema error:\n{}", err),
             Self::Validation(msg) => write!(f, "Validation error: {}", msg),
         }
@@ -28,7 +22,6 @@ impl std::fmt::Display for ConfigError {
 impl std::error::Error for ConfigError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
-            Self::Io(err) => Some(err),
             Self::Parse(err) => Some(err),
             Self::Validation(_) => None,
         }
@@ -70,27 +63,6 @@ pub struct SensorConfig {
     pub periodic_state: bool,
 }
 
-impl Default for SensorConfig {
-    fn default() -> Self {
-        Self {
-            star_power: true,
-            current_song: true,
-            difficulty: true,
-            paused: true,
-            events: true,
-
-            star_power_gauge: false,
-            streak: false,
-            multiplier: false,
-            score: false,
-            notes_hit: false,
-            notes_missed: false,
-            note_missed_event: false,
-            periodic_state: false,
-        }
-    }
-}
-
 /// Global plugin configuration parsed from `gh3_mqtt.toml`.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Config {
@@ -109,28 +81,12 @@ pub struct Config {
     pub sensors: SensorConfig,
 }
 
-impl Default for Config {
-    fn default() -> Self {
-        Self {
-            host: "127.0.0.1".to_string(),
-            port: 1883,
-            username: None,
-            password: None,
-            topic_prefix: "gh3".to_string(),
-            ha_discovery: true,
-            ha_discovery_prefix: "homeassistant".to_string(),
-            poll_interval_ms: 16,
-            gauge_threshold_pct: 1.0,
-            debug_log: true,
-            hifreq: false,
-            sensors: SensorConfig::default(),
-        }
-    }
-}
-
 impl Config {
-    /// Applies parsed TOML configuration values on top of this instance.
-    pub fn apply_toml(&mut self, raw: RawConfig) {
+    /// Constructs a validated `Config` from raw deserialized TOML, applying
+    /// inline defaults for optional fields.
+    pub fn from_toml(content: &str) -> Result<Self, ConfigError> {
+        let raw: RawConfig = toml::from_str(content).map_err(ConfigError::Parse)?;
+
         let RawConfig {
             host,
             port,
@@ -146,58 +102,77 @@ impl Config {
             sensors,
         } = raw;
 
-        if let Some(host) = host {
-            self.host = host;
+        if host.is_empty() {
+            return Err(ConfigError::Validation(
+                "field 'host' cannot be empty.".to_string(),
+            ));
         }
-        if let Some(port) = port {
-            self.port = port;
+        if port == 0 {
+            return Err(ConfigError::Validation(
+                "field 'port' must be greater than 0.".to_string(),
+            ));
         }
-        if let Some(username) = username {
-            self.username = if username.is_empty() {
-                None
-            } else {
-                Some(username)
-            };
+        if topic_prefix.is_empty() {
+            return Err(ConfigError::Validation(
+                "field 'topic_prefix' cannot be empty.".to_string(),
+            ));
         }
-        if let Some(password) = password {
-            self.password = if password.is_empty() {
-                None
-            } else {
-                Some(password)
-            };
+        if topic_prefix.starts_with('/') || topic_prefix.ends_with('/') {
+            return Err(ConfigError::Validation(
+                "field 'topic_prefix' cannot start or end with '/'.".to_string(),
+            ));
         }
-        if let Some(topic_prefix) = topic_prefix {
-            self.topic_prefix = topic_prefix;
+        if topic_prefix.contains("//") {
+            return Err(ConfigError::Validation(
+                "field 'topic_prefix' cannot contain consecutive slashes ('//').".to_string(),
+            ));
         }
-        if let Some(ha_discovery) = ha_discovery {
-            self.ha_discovery = ha_discovery;
-        }
-        if let Some(ha_discovery_prefix) = ha_discovery_prefix {
-            self.ha_discovery_prefix = ha_discovery_prefix;
-        }
-        if let Some(poll_interval_ms) = poll_interval_ms {
-            self.poll_interval_ms = poll_interval_ms;
-        }
-        if let Some(gauge_threshold_pct) = gauge_threshold_pct {
-            self.gauge_threshold_pct = gauge_threshold_pct;
-        }
-        if let Some(debug_log) = debug_log {
-            self.debug_log = debug_log;
+        if topic_prefix.contains('+') || topic_prefix.contains('#') {
+            return Err(ConfigError::Validation(
+                "field 'topic_prefix' cannot contain MQTT wildcards ('+' or '#').".to_string(),
+            ));
         }
 
-        if let Some(hifreq) = hifreq {
-            self.hifreq = hifreq;
-            self.sensors.star_power_gauge = hifreq;
-            self.sensors.streak = hifreq;
-            self.sensors.multiplier = hifreq;
-            self.sensors.score = hifreq;
-            self.sensors.notes_hit = hifreq;
-            self.sensors.notes_missed = hifreq;
-            self.sensors.note_missed_event = hifreq;
-            self.sensors.periodic_state = hifreq;
+        if ha_discovery {
+            if ha_discovery_prefix.is_empty() {
+                return Err(ConfigError::Validation(
+                    "field 'ha_discovery_prefix' cannot be empty when 'ha_discovery' is enabled."
+                        .to_string(),
+                ));
+            }
+            if ha_discovery_prefix.starts_with('/') || ha_discovery_prefix.ends_with('/') {
+                return Err(ConfigError::Validation(
+                    "field 'ha_discovery_prefix' cannot start or end with '/'.".to_string(),
+                ));
+            }
+            if ha_discovery_prefix.contains("//") {
+                return Err(ConfigError::Validation(
+                    "field 'ha_discovery_prefix' cannot contain consecutive slashes ('//')."
+                        .to_string(),
+                ));
+            }
+            if ha_discovery_prefix.contains('+') || ha_discovery_prefix.contains('#') {
+                return Err(ConfigError::Validation(
+                    "field 'ha_discovery_prefix' cannot contain MQTT wildcards ('+' or '#')."
+                        .to_string(),
+                ));
+            }
         }
 
-        if let Some(RawSensorConfig {
+        if !(5..=5000).contains(&poll_interval_ms) {
+            return Err(ConfigError::Validation(format!(
+                "field 'poll_interval_ms' ({}) must be between 5 and 5000 ms.",
+                poll_interval_ms
+            )));
+        }
+        if !(0.1..=50.0).contains(&gauge_threshold_pct) {
+            return Err(ConfigError::Validation(format!(
+                "field 'gauge_threshold_pct' ({}) must be between 0.1% and 50.0%.",
+                gauge_threshold_pct
+            )));
+        }
+
+        let RawSensorConfig {
             star_power,
             current_song,
             difficulty,
@@ -211,118 +186,85 @@ impl Config {
             notes_missed,
             note_missed_event,
             periodic_state,
-        }) = sensors
-        {
-            if let Some(v) = star_power {
-                self.sensors.star_power = v;
-            }
-            if let Some(v) = current_song {
-                self.sensors.current_song = v;
-            }
-            if let Some(v) = difficulty {
-                self.sensors.difficulty = v;
-            }
-            if let Some(v) = paused {
-                self.sensors.paused = v;
-            }
-            if let Some(v) = events {
-                self.sensors.events = v;
-            }
+        } = sensors.unwrap_or_default();
 
-            if let Some(v) = star_power_gauge {
-                self.sensors.star_power_gauge = v;
-            }
-            if let Some(v) = streak {
-                self.sensors.streak = v;
-            }
-            if let Some(v) = multiplier {
-                self.sensors.multiplier = v;
-            }
-            if let Some(v) = score {
-                self.sensors.score = v;
-            }
-            if let Some(v) = notes_hit {
-                self.sensors.notes_hit = v;
-            }
-            if let Some(v) = notes_missed {
-                self.sensors.notes_missed = v;
-            }
-            if let Some(v) = note_missed_event {
-                self.sensors.note_missed_event = v;
-            }
-            if let Some(v) = periodic_state {
-                self.sensors.periodic_state = v;
-            }
-        }
+        let events = events.unwrap_or(true);
 
-        if !self.sensors.events {
-            self.sensors.note_missed_event = false;
-        }
+        Ok(Self {
+            host,
+            port,
+            username: username.filter(|u| !u.is_empty()),
+            password: password.filter(|p| !p.is_empty()),
+            topic_prefix,
+            ha_discovery,
+            ha_discovery_prefix,
+            poll_interval_ms,
+            gauge_threshold_pct,
+            debug_log,
+            hifreq,
+            sensors: SensorConfig {
+                star_power: star_power.unwrap_or(true),
+                current_song: current_song.unwrap_or(true),
+                difficulty: difficulty.unwrap_or(true),
+                paused: paused.unwrap_or(true),
+                events,
+
+                star_power_gauge: star_power_gauge.unwrap_or(hifreq),
+                streak: streak.unwrap_or(hifreq),
+                multiplier: multiplier.unwrap_or(hifreq),
+                score: score.unwrap_or(hifreq),
+                notes_hit: notes_hit.unwrap_or(hifreq),
+                notes_missed: notes_missed.unwrap_or(hifreq),
+                note_missed_event: if !events {
+                    false
+                } else {
+                    note_missed_event.unwrap_or(hifreq)
+                },
+                periodic_state: periodic_state.unwrap_or(hifreq),
+            },
+        })
+    }
+}
+
+/// Raw deserialization schema mapping directly to `gh3_mqtt.toml`.
+pub mod schema {
+    use serde::Deserialize;
+
+    /// Raw TOML schema for individual sensor and event toggles.
+    #[derive(Debug, Clone, Default, Deserialize)]
+    #[serde(deny_unknown_fields)]
+    pub struct RawSensorConfig {
+        pub star_power: Option<bool>,
+        pub current_song: Option<bool>,
+        pub difficulty: Option<bool>,
+        pub paused: Option<bool>,
+        pub events: Option<bool>,
+        pub star_power_gauge: Option<bool>,
+        pub streak: Option<bool>,
+        pub multiplier: Option<bool>,
+        pub score: Option<bool>,
+        pub notes_hit: Option<bool>,
+        pub notes_missed: Option<bool>,
+        pub note_missed_event: Option<bool>,
+        pub periodic_state: Option<bool>,
     }
 
-    /// Validates configuration values and normalizes topic prefixes.
-    pub fn validate(&mut self) -> Result<(), ConfigError> {
-        if self.host.trim().is_empty() {
-            return Err(ConfigError::Validation(
-                "field 'host' cannot be empty.".to_string(),
-            ));
-        }
-        if self.port == 0 {
-            return Err(ConfigError::Validation(
-                "field 'port' must be greater than 0.".to_string(),
-            ));
-        }
-        self.topic_prefix = self.topic_prefix.trim_matches('/').to_string();
-        if self.topic_prefix.is_empty() {
-            return Err(ConfigError::Validation(
-                "field 'topic_prefix' cannot be empty.".to_string(),
-            ));
-        }
-        self.ha_discovery_prefix = self.ha_discovery_prefix.trim_matches('/').to_string();
-        if self.ha_discovery && self.ha_discovery_prefix.is_empty() {
-            return Err(ConfigError::Validation(
-                "field 'ha_discovery_prefix' cannot be empty when 'ha_discovery' is enabled."
-                    .to_string(),
-            ));
-        }
-        if !(5..=5000).contains(&self.poll_interval_ms) {
-            return Err(ConfigError::Validation(format!(
-                "field 'poll_interval_ms' ({}) must be between 5 and 5000 ms.",
-                self.poll_interval_ms
-            )));
-        }
-        if !(0.1..=50.0).contains(&self.gauge_threshold_pct) {
-            return Err(ConfigError::Validation(format!(
-                "field 'gauge_threshold_pct' ({}) must be between 0.1% and 50.0%.",
-                self.gauge_threshold_pct
-            )));
-        }
-        Ok(())
-    }
-
-    /// Parse and validate configuration strictly from a TOML string.
-    pub fn parse_toml_str(content: &str) -> Result<Self, ConfigError> {
-        let raw: RawConfig = toml::from_str(content).map_err(ConfigError::Parse)?;
-        let mut config = Self::default();
-        config.apply_toml(raw);
-        config.validate()?;
-        Ok(config)
-    }
-
-    /// Load configuration strictly from the specified TOML file.
-    ///
-    /// If the file does not exist, writes the default TOML template and returns
-    /// default config. If the file exists but contains malformed TOML or
-    /// invalid values, returns `Err`.
-    pub fn load_strict<P: AsRef<Path>>(path: P) -> Result<Self, ConfigError> {
-        let path = path.as_ref();
-        if !path.exists() {
-            let _ = fs::write(path, DEFAULT_TOML);
-            return Ok(Self::default());
-        }
-
-        let content = fs::read_to_string(path).map_err(ConfigError::Io)?;
-        Self::parse_toml_str(&content)
+    /// Raw TOML schema for the configuration file.
+    #[derive(Debug, Clone, Deserialize)]
+    #[serde(deny_unknown_fields)]
+    pub struct RawConfig {
+        pub host: String,
+        pub port: u16,
+        pub username: Option<String>,
+        pub password: Option<String>,
+        pub topic_prefix: String,
+        pub ha_discovery: bool,
+        pub ha_discovery_prefix: String,
+        pub poll_interval_ms: u64,
+        pub gauge_threshold_pct: f32,
+        pub debug_log: bool,
+        pub hifreq: bool,
+        pub sensors: Option<RawSensorConfig>,
     }
 }
 
@@ -378,45 +320,3 @@ hifreq = false
 # note_missed_event = true
 # periodic_state = true
 "#;
-
-/// Raw deserialization schema mapping directly to `gh3_mqtt.toml`.
-pub mod schema {
-    use serde::Deserialize;
-
-    /// Raw TOML schema for individual sensor and event toggles.
-    #[derive(Debug, Clone, Deserialize)]
-    #[serde(deny_unknown_fields)]
-    pub struct RawSensorConfig {
-        pub star_power: Option<bool>,
-        pub current_song: Option<bool>,
-        pub difficulty: Option<bool>,
-        pub paused: Option<bool>,
-        pub events: Option<bool>,
-        pub star_power_gauge: Option<bool>,
-        pub streak: Option<bool>,
-        pub multiplier: Option<bool>,
-        pub score: Option<bool>,
-        pub notes_hit: Option<bool>,
-        pub notes_missed: Option<bool>,
-        pub note_missed_event: Option<bool>,
-        pub periodic_state: Option<bool>,
-    }
-
-    /// Raw TOML schema for the configuration file.
-    #[derive(Debug, Clone, Deserialize)]
-    #[serde(deny_unknown_fields)]
-    pub struct RawConfig {
-        pub host: Option<String>,
-        pub port: Option<u16>,
-        pub username: Option<String>,
-        pub password: Option<String>,
-        pub topic_prefix: Option<String>,
-        pub ha_discovery: Option<bool>,
-        pub ha_discovery_prefix: Option<String>,
-        pub poll_interval_ms: Option<u64>,
-        pub gauge_threshold_pct: Option<f32>,
-        pub debug_log: Option<bool>,
-        pub hifreq: Option<bool>,
-        pub sensors: Option<RawSensorConfig>,
-    }
-}

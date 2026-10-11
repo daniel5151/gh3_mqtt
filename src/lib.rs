@@ -184,12 +184,36 @@ fn publish_all_entities(client: &mut MqttClient, config: &Config, state: &GameSt
     }
 }
 
+fn load_config<P: AsRef<Path>>(path: P) -> Result<Config, String> {
+    let path = path.as_ref();
+    if !path.exists() {
+        std::fs::write(path, config::DEFAULT_TOML).map_err(|e| {
+            format!(
+                "Could not create default configuration file '{}': {}",
+                path.display(),
+                e
+            )
+        })?;
+        return Config::from_toml(config::DEFAULT_TOML).map_err(|e| e.to_string());
+    }
+
+    let content = std::fs::read_to_string(path).map_err(|e| {
+        format!(
+            "Could not read configuration file '{}': {}",
+            path.display(),
+            e
+        )
+    })?;
+
+    Config::from_toml(&content).map_err(|e| e.to_string())
+}
+
 fn worker_main() {
     let plugin_dir = get_plugin_dir();
     let toml_path = plugin_dir.join("gh3_mqtt.toml");
     let log_path = plugin_dir.join("gh3_mqtt.log");
 
-    let config = match Config::load_strict(&toml_path) {
+    let config = match load_config(&toml_path) {
         Ok(c) => c,
         Err(err) => {
             let msg = format!(

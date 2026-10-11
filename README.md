@@ -215,7 +215,7 @@ Configured with `min-sized-rust` release profile flags (`opt-level = "z"`, `lto 
 cd gh3_mqtt
 cargo build --release
 ```
-*Output size: **~240 KB** (down from ~357 KB baseline).*
+*Output size: **~399 KB**.*
 
 ### Ultra-Crunched Build (Nightly + `build-std`)
 
@@ -225,6 +225,6 @@ For maximum size crunching with `build-std`, `panic = "immediate-abort"`, and lo
 cd gh3_mqtt
 .\build-min.ps1
 ```
-*Output size: **~132 KB** (~63% total reduction).*
+*Output size: **~296 KB** (~25% reduction).*
 
 > **Tip:** If you prefer not to build from source, pre-compiled Ultra-Crunched binaries are available under [GitHub Releases](https://github.com/daniel5151/gh3_mqtt/releases).

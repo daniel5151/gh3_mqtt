@@ -105,69 +105,175 @@ fn star_power_attributes(state: &GameState) -> serde_json::Value {
     })
 }
 
-fn publish_all_entities(publisher: &mut Publisher<'_>, config: &Config, state: &GameState) {
+fn publish_game_state(
+    publisher: &mut Publisher<'_>,
+    config: &Config,
+    current: &GameState,
+    last: Option<&GameState>,
+) {
     let s = &config.sensors;
+    let force = last.is_none_or(|prev| current.is_playing != prev.is_playing);
 
-    // 1. Song Active Availability (playing / idle)
-    publisher.publish_retained(
-        "game/song_active",
-        if state.is_playing { "playing" } else { "idle" },
-    );
+    // 1. Song Active Availability & Transition Events
+    if force {
+        publisher.publish_retained(
+            "game/song_active",
+            if current.is_playing {
+                "playing"
+            } else {
+                "idle"
+            },
+        );
 
-    // 2. Game-level sensors (Song Title - Artist, Difficulty, Paused)
-    if s.current_song {
-        let song_text = if state.is_playing {
-            &state.current_song
+        if last.is_some() {
+            if s.events {
+                publisher.publish(
+                    "player1/event",
+                    if current.is_playing {
+                        "song_started"
+                    } else {
+                        "song_ended"
+                    },
+                );
+            }
+            log::debug!(
+                "Song playing state changed: is_playing={}, song='{}', diff={}, paused={}",
+                current.is_playing,
+                current.current_song,
+                current.difficulty,
+                current.is_paused
+            );
+        }
+    }
+
+    // 2. Song Paused State
+    if s.paused && (force || last.is_some_and(|p| current.is_paused != p.is_paused)) {
+        publisher.publish(
+            "game/paused/state",
+            if current.is_paused { "ON" } else { "OFF" },
+        );
+        if !force {
+            log::debug!("Game pause state changed: is_paused={}", current.is_paused);
+        }
+    }
+
+    // 3. Current Song
+    if s.current_song && (force || last.is_some_and(|p| current.current_song != p.current_song)) {
+        let song_text = if current.is_playing {
+            &current.current_song
         } else {
             "Idle"
         };
         publisher.publish("game/current_song", song_text);
-    }
-    if s.difficulty {
-        publisher.publish("game/difficulty", &state.difficulty);
-    }
-    if s.paused {
-        publisher.publish(
-            "game/paused/state",
-            if state.is_paused { "ON" } else { "OFF" },
-        );
+        if !force {
+            log::debug!("Song name updated: current_song='{}'", song_text);
+        }
     }
 
-    // 3. Gameplay sensors
-    if s.star_power {
+    // 4. Difficulty
+    if s.difficulty && (force || last.is_some_and(|p| current.difficulty != p.difficulty)) {
+        publisher.publish("game/difficulty", &current.difficulty);
+    }
+
+    // 5. Star Power Active State & Events
+    let sp_active_changed = last.is_some_and(|p| current.star_power_active != p.star_power_active);
+    if s.star_power && (force || sp_active_changed) {
         publisher.publish(
             "player1/star_power/state",
-            if state.star_power_active { "ON" } else { "OFF" },
+            if current.star_power_active {
+                "ON"
+            } else {
+                "OFF"
+            },
         );
         publisher.publish(
             "player1/star_power/attributes",
-            star_power_attributes(state),
+            star_power_attributes(current),
         );
     }
-    if s.star_power_gauge {
-        publisher.publish(
-            "player1/star_power/gauge",
-            format!("{:.1}", state.star_power_gauge),
+    if !force && sp_active_changed {
+        if s.events {
+            publisher.publish(
+                "player1/event",
+                if current.star_power_active {
+                    "star_power_activated"
+                } else {
+                    "star_power_deactivated"
+                },
+            );
+        }
+        log::debug!(
+            "Star Power state changed: active={} (gauge={:.1}%, streak={}, mult={}x)",
+            current.star_power_active,
+            current.star_power_gauge,
+            current.streak,
+            current.effective_multiplier,
         );
-    }
-    if s.streak {
-        publisher.publish("player1/streak", state.streak);
-    }
-    if s.multiplier {
-        publisher.publish("player1/multiplier", state.effective_multiplier);
-    }
-    if s.score {
-        publisher.publish("player1/score", state.score);
-    }
-    if s.notes_missed {
-        publisher.publish("player1/notes_missed", state.notes_missed);
-    }
-    if s.notes_hit {
-        publisher.publish("player1/notes_hit", state.notes_hit);
     }
 
-    if s.periodic_state {
-        if let Ok(json) = serde_json::to_string(state) {
+    // 6. Star Power Gauge
+    if s.star_power_gauge {
+        let gauge_changed = force
+            || last.is_some_and(|p| {
+                let gauge_diff = (current.star_power_gauge - p.star_power_gauge).abs();
+                gauge_diff >= config.gauge_threshold_pct
+                    || current.star_power_active != p.star_power_active
+            });
+        if gauge_changed {
+            publisher.publish(
+                "player1/star_power/gauge",
+                format!("{:.1}", current.star_power_gauge),
+            );
+        }
+    }
+
+    // 7. Streak & Missed Note Detection
+    let streak_changed = last.is_some_and(|p| current.streak != p.streak);
+    if s.streak && (force || streak_changed) {
+        publisher.publish("player1/streak", current.streak);
+    }
+
+    if let Some(prev) = last {
+        if !force {
+            let streak_broken = current.is_playing && prev.streak > 0 && current.streak == 0;
+            let notes_missed_increased =
+                current.is_playing && current.notes_missed > prev.notes_missed;
+            let note_missed = streak_broken || notes_missed_increased;
+
+            if streak_broken {
+                log::debug!("Note missed / streak broken! (was {})", prev.streak);
+            }
+            if s.note_missed_event && note_missed {
+                publisher.publish("player1/event", "note_missed");
+            }
+        }
+    }
+
+    // 8. Notes Missed Counter
+    if s.notes_missed && (force || last.is_some_and(|p| current.notes_missed != p.notes_missed)) {
+        publisher.publish("player1/notes_missed", current.notes_missed);
+    }
+
+    // 9. Notes Hit Counter
+    if s.notes_hit && (force || last.is_some_and(|p| current.notes_hit != p.notes_hit)) {
+        publisher.publish("player1/notes_hit", current.notes_hit);
+    }
+
+    // 10. Multiplier
+    if s.multiplier
+        && (force || last.is_some_and(|p| current.effective_multiplier != p.effective_multiplier))
+    {
+        publisher.publish("player1/multiplier", current.effective_multiplier);
+    }
+
+    // 11. Score
+    if s.score && (force || last.is_some_and(|p| current.score != p.score)) {
+        publisher.publish("player1/score", current.score);
+    }
+
+    // 12. Initial / On-Transition Full State
+    if force && s.periodic_state {
+        if let Ok(json) = serde_json::to_string(current) {
             publisher.publish("player1/state", json);
         }
     }
@@ -281,7 +387,7 @@ fn run_plugin() -> anyhow::Result<()> {
                     // Immediately publish initial values for all entities
                     let initial_state = gh3::read_game_state(&mem);
                     let mut publisher = Publisher::new(&mut client, &config.topic_prefix);
-                    publish_all_entities(&mut publisher, &config, &initial_state);
+                    publish_game_state(&mut publisher, &config, &initial_state, None);
                     last_state = initial_state;
                 }
                 Err(err) => {
@@ -302,165 +408,9 @@ fn run_plugin() -> anyhow::Result<()> {
         let current_state = gh3::read_game_state(&mem);
 
         let mut publisher = Publisher::new(&mut client, &config.topic_prefix);
+        publish_game_state(&mut publisher, &config, &current_state, Some(&last_state));
 
-        // 1. Song Playing State Change
-        if current_state.is_playing != last_state.is_playing {
-            publisher.publish_retained(
-                "game/song_active",
-                if current_state.is_playing {
-                    "playing"
-                } else {
-                    "idle"
-                },
-            );
-
-            if config.sensors.events {
-                publisher.publish(
-                    "player1/event",
-                    if current_state.is_playing {
-                        "song_started"
-                    } else {
-                        "song_ended"
-                    },
-                );
-            }
-
-            log::debug!(
-                "Song playing state changed: is_playing={}, song='{}', diff={}, paused={}",
-                current_state.is_playing,
-                current_state.current_song,
-                current_state.difficulty,
-                current_state.is_paused
-            );
-
-            publish_all_entities(&mut publisher, &config, &current_state);
-        }
-
-        // 2. Song Paused State Change
-        if config.sensors.paused && current_state.is_paused != last_state.is_paused {
-            publisher.publish(
-                "game/paused/state",
-                if current_state.is_paused { "ON" } else { "OFF" },
-            );
-
-            log::debug!(
-                "Game pause state changed: is_paused={}",
-                current_state.is_paused
-            );
-        }
-
-        // 3. Song or Difficulty Change
-        if config.sensors.current_song && current_state.current_song != last_state.current_song {
-            let song_text = if current_state.is_playing {
-                &current_state.current_song
-            } else {
-                "Idle"
-            };
-            publisher.publish("game/current_song", song_text);
-
-            log::debug!("Song name updated: current_song='{}'", song_text);
-        }
-
-        if config.sensors.difficulty && current_state.difficulty != last_state.difficulty {
-            publisher.publish("game/difficulty", &current_state.difficulty);
-        }
-
-        // 4. Star Power Active State Change
-        if current_state.star_power_active != last_state.star_power_active {
-            if config.sensors.star_power {
-                publisher.publish(
-                    "player1/star_power/state",
-                    if current_state.star_power_active {
-                        "ON"
-                    } else {
-                        "OFF"
-                    },
-                );
-
-                publisher.publish(
-                    "player1/star_power/attributes",
-                    star_power_attributes(&current_state),
-                );
-            }
-
-            if config.sensors.events {
-                publisher.publish(
-                    "player1/event",
-                    if current_state.star_power_active {
-                        "star_power_activated"
-                    } else {
-                        "star_power_deactivated"
-                    },
-                );
-            }
-
-            log::debug!(
-                "Star Power state changed: active={} (gauge={:.1}%, streak={}, mult={}x)",
-                current_state.star_power_active,
-                current_state.star_power_gauge,
-                current_state.streak,
-                current_state.effective_multiplier,
-            );
-        }
-
-        // 5. Star Power Gauge
-        if config.sensors.star_power_gauge {
-            let gauge_diff = (current_state.star_power_gauge - last_state.star_power_gauge).abs();
-            if gauge_diff >= config.gauge_threshold_pct
-                || (current_state.star_power_active != last_state.star_power_active)
-            {
-                publisher.publish(
-                    "player1/star_power/gauge",
-                    format!("{:.1}", current_state.star_power_gauge),
-                );
-            }
-        }
-
-        // 6. Streak Change & Missed Note Detection
-        let streak_broken =
-            current_state.is_playing && last_state.streak > 0 && current_state.streak == 0;
-        let notes_missed_increased =
-            current_state.is_playing && current_state.notes_missed > last_state.notes_missed;
-        let note_missed = streak_broken || notes_missed_increased;
-
-        if current_state.streak != last_state.streak {
-            if config.sensors.streak {
-                publisher.publish("player1/streak", current_state.streak);
-            }
-
-            if streak_broken {
-                log::debug!("Note missed / streak broken! (was {})", last_state.streak);
-            }
-        }
-
-        // Edge-triggered note_missed event
-        if config.sensors.note_missed_event && note_missed {
-            publisher.publish("player1/event", "note_missed");
-        }
-
-        // 7. Notes Missed Counter Change
-        if config.sensors.notes_missed && current_state.notes_missed != last_state.notes_missed {
-            publisher.publish("player1/notes_missed", current_state.notes_missed);
-        }
-
-        // 8. Notes Hit Counter Change
-        if config.sensors.notes_hit && current_state.notes_hit != last_state.notes_hit {
-            publisher.publish("player1/notes_hit", current_state.notes_hit);
-        }
-
-        // 9. Multiplier Change
-        if config.sensors.multiplier
-            && current_state.effective_multiplier != last_state.effective_multiplier
-        {
-            publisher.publish("player1/multiplier", current_state.effective_multiplier);
-        }
-
-        // 10. Total Score Change
-        if config.sensors.score && current_state.score != last_state.score {
-            publisher.publish("player1/score", current_state.score);
-        }
-
-        // 11. Periodic full state update (every 1 second)
+        // Periodic full state update (every 1 second)
         if config.sensors.periodic_state
             && last_periodic_publish.elapsed() >= Duration::from_millis(1000)
         {

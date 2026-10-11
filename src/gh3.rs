@@ -43,107 +43,107 @@ const fn crc32_byte(b: u8, crc: u32) -> u32 {
     c ^ (crc >> 8)
 }
 
-pub const ADDR_IS_PLAYING_SONG: usize = 0x00B4EB21;
-pub const ADDR_SONG_PAUSED: usize = 0x00B4E320;
-pub const ADDR_CURRENT_SONG_KEY: usize = 0x00A13314;
-pub const ADDR_SONG_: usize = 0x00A1331C;
-pub const ADDR_ITEM_MAP: usize = 0x00C03AA8;
-pub const ADDR_P1_STATUS_PTR: usize = 0x00A12FCC;
-pub const ADDR_SCORE_OBJECT: usize = 0x00A12FD0;
+const ADDR_IS_PLAYING_SONG: usize = 0x00B4EB21;
+const ADDR_SONG_PAUSED: usize = 0x00B4E320;
+const ADDR_CURRENT_SONG_KEY: usize = 0x00A13314;
+const ADDR_SONG_: usize = 0x00A1331C;
+const ADDR_ITEM_MAP: usize = 0x00C03AA8;
+const ADDR_P1_STATUS_PTR: usize = 0x00A12FCC;
+const ADDR_SCORE_OBJECT: usize = 0x00A12FD0;
 
-pub const KEY_PLAYER1_STATUS: u32 = qb_hash("player1_status");
-pub const KEY_STAR_POWER_USED: u32 = qb_hash("star_power_used");
-pub const KEY_STAR_POWER_AMOUNT: u32 = qb_hash("star_power_amount");
-pub const KEY_STAR_POWER_USABLE: u32 = qb_hash("star_power_usable");
-pub const KEY_CURRENT_RUN: u32 = qb_hash("current_run");
-pub const KEY_SCORE: u32 = qb_hash("score");
+const KEY_PLAYER1_STATUS: u32 = qb_hash("player1_status");
+const KEY_STAR_POWER_USED: u32 = qb_hash("star_power_used");
+const KEY_STAR_POWER_AMOUNT: u32 = qb_hash("star_power_amount");
+const KEY_STAR_POWER_USABLE: u32 = qb_hash("star_power_usable");
+const KEY_CURRENT_RUN: u32 = qb_hash("current_run");
+const KEY_SCORE: u32 = qb_hash("score");
 #[expect(dead_code)]
-pub const KEY_NUM_MULTIPLIER: u32 = qb_hash("num_multiplier");
-pub const KEY_CURRENT_HEALTH: u32 = qb_hash("current_health");
-pub const KEY_TOTAL_NOTES: u32 = qb_hash("total_notes");
-pub const KEY_NOTES_HIT: u32 = qb_hash("notes_hit");
+const KEY_NUM_MULTIPLIER: u32 = qb_hash("num_multiplier");
+const KEY_CURRENT_HEALTH: u32 = qb_hash("current_health");
+const KEY_TOTAL_NOTES: u32 = qb_hash("total_notes");
+const KEY_NOTES_HIT: u32 = qb_hash("notes_hit");
 
-pub const KEY_CURRENT_DIFFICULTY: u32 = qb_hash("current_difficulty");
-pub const KEY_CURRENT_SONG: u32 = qb_hash("current_song");
-pub const KEY_FASTGH3_META: u32 = qb_hash("fastgh3_meta");
-pub const KEY_GH3_SONGLIST_PROPS: u32 = qb_hash("gh3_songlist_props");
-pub const KEY_PERMANENT_SONGLIST_PROPS: u32 = qb_hash("permanent_songlist_props");
-pub const KEY_TITLE: u32 = qb_hash("title");
-pub const KEY_ARTIST: u32 = qb_hash("artist");
-pub const KEY_AUTHOR: u32 = qb_hash("author");
+const KEY_CURRENT_DIFFICULTY: u32 = qb_hash("current_difficulty");
+const KEY_CURRENT_SONG: u32 = qb_hash("current_song");
+const KEY_FASTGH3_META: u32 = qb_hash("fastgh3_meta");
+const KEY_GH3_SONGLIST_PROPS: u32 = qb_hash("gh3_songlist_props");
+const KEY_PERMANENT_SONGLIST_PROPS: u32 = qb_hash("permanent_songlist_props");
+const KEY_TITLE: u32 = qb_hash("title");
+const KEY_ARTIST: u32 = qb_hash("artist");
+const KEY_AUTHOR: u32 = qb_hash("author");
 
-pub const KEY_EASY: u32 = qb_hash("easy");
-pub const KEY_MEDIUM: u32 = qb_hash("medium");
-pub const KEY_HARD: u32 = qb_hash("hard");
-pub const KEY_EXPERT: u32 = qb_hash("expert");
+const KEY_EASY: u32 = qb_hash("easy");
+const KEY_MEDIUM: u32 = qb_hash("medium");
+const KEY_HARD: u32 = qb_hash("hard");
+const KEY_EXPERT: u32 = qb_hash("expert");
 
 #[repr(C)]
 #[derive(FromBytes, IntoBytes, KnownLayout, Immutable, Clone, Copy, Debug, PartialEq)]
-pub struct HashMapNode {
-    pub byte0: u8,
-    pub byte1: u8,
-    pub item_type: u8,
-    pub byte3: u8,
-    pub key: u32,
-    pub dword8: u32,
-    pub value: u32,
-    pub next_item: u32,
+struct HashMapNode {
+    byte0: u8,
+    byte1: u8,
+    item_type: u8,
+    byte3: u8,
+    key: u32,
+    dword8: u32,
+    value: u32,
+    next_item: u32,
 }
 
 #[repr(C)]
 #[derive(FromBytes, IntoBytes, KnownLayout, Immutable, Clone, Copy, Debug, PartialEq)]
-pub struct QbStruct {
-    pub unk0: u16,
-    pub unk2: u8,
-    pub unk3: u8,
-    pub first: u32,
+struct QbStruct {
+    unk0: u16,
+    unk2: u8,
+    unk3: u8,
+    first: u32,
 }
 
 #[repr(C)]
 #[derive(FromBytes, IntoBytes, KnownLayout, Immutable, Clone, Copy, Debug, PartialEq)]
-pub struct QbStructItem {
-    pub unk_flag0: u8,
-    pub flags: u8,
-    pub word2: u16,
-    pub key: u32,
-    pub value: u32,
-    pub next: u32,
+struct QbStructItem {
+    unk_flag0: u8,
+    flags: u8,
+    word2: u16,
+    key: u32,
+    value: u32,
+    next: u32,
 }
 
 impl QbStructItem {
     #[inline]
-    pub fn item_type(&self) -> u8 {
+    fn item_type(&self) -> u8 {
         self.flags >> 1
     }
 }
 
 #[repr(C)]
 #[derive(FromBytes, IntoBytes, KnownLayout, Immutable, Clone, Copy, Debug, PartialEq)]
-pub struct QbMapNode {
-    pub key: u32,
-    pub value: u32,
-    pub next_node: u32,
+struct QbMapNode {
+    key: u32,
+    value: u32,
+    next_node: u32,
 }
 
 #[repr(C)]
 #[derive(FromBytes, IntoBytes, KnownLayout, Immutable, Clone, Copy, Debug, PartialEq)]
-pub struct QbMap {
-    pub size: u32,
-    pub nodes: u32,
-    pub type_flags: u8,
-    pub _pad: [u8; 3],
-    pub unk_c: u32,
-    pub unk_10: u32,
-    pub unk_14: u8,
-    pub bool_flag: u8,
-    pub keep_alive: u8,
-    pub unk_17: u8,
+struct QbMap {
+    size: u32,
+    nodes: u32,
+    type_flags: u8,
+    _pad: [u8; 3],
+    unk_c: u32,
+    unk_10: u32,
+    unk_14: u8,
+    bool_flag: u8,
+    keep_alive: u8,
+    unk_17: u8,
 }
 
 impl QbMap {
     #[expect(dead_code)]
     #[inline]
-    pub fn item_type(&self) -> u8 {
+    fn item_type(&self) -> u8 {
         self.type_flags >> 1
     }
 }
@@ -154,14 +154,14 @@ pub struct GameState {
     pub is_paused: bool,
     pub star_power_active: bool,
     pub star_power_gauge: f32,
-    pub star_power_usable: bool,
+    star_power_usable: bool,
     pub streak: u32,
-    pub multiplier: u32,
+    multiplier: u32,
     pub effective_multiplier: u32,
     pub score: u32,
-    pub rock_meter: f32,
+    rock_meter: f32,
     pub notes_hit: u32,
-    pub total_notes: u32,
+    total_notes: u32,
     pub notes_missed: u32,
     pub current_song: String,
     pub difficulty: String,
@@ -209,7 +209,7 @@ impl MemoryView {
 
     /// Checks if the memory range `[ptr, ptr + size)` is currently committed
     /// and readable in user space.
-    pub fn is_readable(&self, ptr: *const c_void, size: usize) -> bool {
+    fn is_readable(&self, ptr: *const c_void, size: usize) -> bool {
         let addr = ptr as usize;
         #[cfg(target_pointer_width = "32")]
         let is_user_addr = (0x00010000..=0x7FFF0000).contains(&addr);
@@ -233,7 +233,7 @@ impl MemoryView {
 
     /// Returns the number of readable bytes (up to `max_len`) available
     /// starting at `ptr`.
-    pub fn readable_len(&self, ptr: *const c_void, max_len: usize) -> usize {
+    fn readable_len(&self, ptr: *const c_void, max_len: usize) -> usize {
         let addr = ptr as usize;
         #[cfg(target_pointer_width = "32")]
         let is_user_addr = (0x00010000..=0x7FFF0000).contains(&addr);
@@ -264,7 +264,7 @@ impl MemoryView {
 
     /// Safely copies a value of type `T` from `addr` using zerocopy if
     /// readable.
-    pub fn read_val<T: FromBytes>(&self, addr: usize) -> Option<T> {
+    fn read_val<T: FromBytes>(&self, addr: usize) -> Option<T> {
         let size = size_of::<T>();
         if !self.is_readable(addr as *const c_void, size) {
             return None;
@@ -277,7 +277,7 @@ impl MemoryView {
 
     /// Extracts a null-terminated string (CString or UTF-16 WString) from a
     /// `QbStructItem`.
-    pub fn extract_string_from_item(&self, item: &QbStructItem) -> Option<String> {
+    fn extract_string_from_item(&self, item: &QbStructItem) -> Option<String> {
         let type_val = item.item_type();
         let addr = item.value as usize;
         let len = self.readable_len(addr as *const c_void, 256);
@@ -327,7 +327,7 @@ impl MemoryView {
 }
 
 /// A safe view into a Neversoft `QbStruct` linked list in engine memory.
-pub struct QbStructView<'a> {
+struct QbStructView<'a> {
     mem: &'a MemoryView,
     addr: usize,
 }
@@ -335,7 +335,7 @@ pub struct QbStructView<'a> {
 impl<'a> QbStructView<'a> {
     /// Attempts to wrap a `QbStruct` at `addr` after validating its
     /// readability.
-    pub fn new(mem: &'a MemoryView, addr: usize) -> Option<Self> {
+    fn new(mem: &'a MemoryView, addr: usize) -> Option<Self> {
         if addr != 0 && mem.read_val::<QbStruct>(addr).is_some() {
             Some(Self { mem, addr })
         } else {
@@ -345,7 +345,7 @@ impl<'a> QbStructView<'a> {
 
     /// Finds a struct item matching `key` by traversing the linked list (and
     /// any nested `QbMap`).
-    pub fn get_item(&self, key: u32) -> Option<QbStructItem> {
+    fn get_item(&self, key: u32) -> Option<QbStructItem> {
         let st = self.mem.read_val::<QbStruct>(self.addr)?;
         let mut item_addr = st.first as usize;
         let mut count = 0;
@@ -406,17 +406,17 @@ impl<'a> QbStructView<'a> {
     }
 
     /// Reads a `u32` value for `key`.
-    pub fn get_u32(&self, key: u32) -> Option<u32> {
+    fn get_u32(&self, key: u32) -> Option<u32> {
         self.get_item(key).map(|item| item.value)
     }
 
     /// Reads a boolean value for `key`.
-    pub fn get_bool(&self, key: u32) -> Option<bool> {
+    fn get_bool(&self, key: u32) -> Option<bool> {
         self.get_item(key).map(|item| item.value != 0)
     }
 
     /// Reads an `f32` (or integer converted to `f32`) for `key`.
-    pub fn get_f32(&self, key: u32) -> Option<f32> {
+    fn get_f32(&self, key: u32) -> Option<f32> {
         self.get_item(key).map(|item| match item.item_type() {
             2 => f32::from_bits(item.value),
             1 => item.value as f32,
@@ -425,19 +425,19 @@ impl<'a> QbStructView<'a> {
     }
 
     /// Reads a string value for `key`.
-    pub fn get_string(&self, key: u32) -> Option<String> {
+    fn get_string(&self, key: u32) -> Option<String> {
         self.get_item(key)
             .and_then(|item| self.mem.extract_string_from_item(&item))
     }
 
     /// Resolves a nested `QbStruct` for `key`.
-    pub fn get_struct(&self, key: u32) -> Option<QbStructView<'a>> {
+    fn get_struct(&self, key: u32) -> Option<QbStructView<'a>> {
         self.get_item(key)
             .and_then(|item| QbStructView::new(self.mem, item.value as usize))
     }
 
     /// Resolves score value, handling both integer and float representation.
-    pub fn get_score(&self) -> Option<u32> {
+    fn get_score(&self) -> Option<u32> {
         self.get_item(KEY_SCORE).map(|item| {
             if item.item_type() == 2 {
                 f32::from_bits(item.value).max(0.0) as u32
@@ -449,14 +449,14 @@ impl<'a> QbStructView<'a> {
 }
 
 /// A safe view into the Neversoft GlobalMap hash bucket table.
-pub struct GlobalMapView<'a> {
+struct GlobalMapView<'a> {
     mem: &'a MemoryView,
     table_addr: usize,
 }
 
 impl<'a> GlobalMapView<'a> {
     /// Attempts to locate and validate the GlobalMap bucket table in memory.
-    pub fn locate(mem: &'a MemoryView) -> Option<Self> {
+    fn locate(mem: &'a MemoryView) -> Option<Self> {
         let tbl_ptr = mem.read_val::<u32>(ADDR_ITEM_MAP)?;
         let table_addr = tbl_ptr as usize;
         if table_addr != 0 && mem.is_readable(table_addr as *const c_void, 0x8000 * 4) {
@@ -467,7 +467,7 @@ impl<'a> GlobalMapView<'a> {
     }
 
     /// Finds a `HashMapNode` matching `key` in the GlobalMap buckets.
-    pub fn get_node(&self, key: u32) -> Option<HashMapNode> {
+    fn get_node(&self, key: u32) -> Option<HashMapNode> {
         let index = (key & 0x7FFF) as usize;
         let bucket_addr = self.table_addr + index * 4;
         let mut curr_addr = self.mem.read_val::<u32>(bucket_addr)? as usize;
@@ -484,13 +484,13 @@ impl<'a> GlobalMapView<'a> {
     }
 
     /// Resolves a `QbStruct` stored in the GlobalMap for `key`.
-    pub fn get_struct(&self, key: u32) -> Option<QbStructView<'a>> {
+    fn get_struct(&self, key: u32) -> Option<QbStructView<'a>> {
         let node = self.get_node(key)?;
         QbStructView::new(self.mem, node.value as usize)
     }
 
     /// Reads a `u32` value stored in the GlobalMap for `key`.
-    pub fn get_u32(&self, key: u32) -> Option<u32> {
+    fn get_u32(&self, key: u32) -> Option<u32> {
         self.get_node(key).map(|node| node.value)
     }
 }
@@ -518,7 +518,14 @@ pub fn read_game_state(mem: &MemoryView) -> GameState {
     if let Some(map) = &global_map
         && let Some(diff_val) = map.get_u32(KEY_CURRENT_DIFFICULTY)
     {
-        state.difficulty = resolve_difficulty(diff_val).to_string();
+        state.difficulty = match diff_val {
+            KEY_EASY => "Easy",
+            KEY_MEDIUM => "Medium",
+            KEY_HARD => "Hard",
+            KEY_EXPERT => "Expert",
+            _ => "Expert",
+        }
+        .to_string();
     }
 
     // 5. Read song info if playing
@@ -604,19 +611,9 @@ pub fn read_game_state(mem: &MemoryView) -> GameState {
     state
 }
 
-pub fn resolve_difficulty(diff_key: u32) -> &'static str {
-    match diff_key {
-        KEY_EASY => "Easy",
-        KEY_MEDIUM => "Medium",
-        KEY_HARD => "Hard",
-        KEY_EXPERT => "Expert",
-        _ => "Expert",
-    }
-}
-
 /// Resolves the current song title and artist from FastGH3 metadata or songlist
 /// properties.
-pub fn read_song_info(mem: &MemoryView, global_map: Option<&GlobalMapView<'_>>) -> Option<String> {
+fn read_song_info(mem: &MemoryView, global_map: Option<&GlobalMapView<'_>>) -> Option<String> {
     // 1. Check fastgh3_meta struct (FastGH3 custom songs)
     if let Some(meta) = global_map.and_then(|map| map.get_struct(KEY_FASTGH3_META)) {
         let title = meta.get_string(KEY_TITLE);
@@ -768,7 +765,7 @@ const KNOWN_SONGS: &[(u32, &str)] = &[
     (qb_hash("cherubrock"),            "Cherub Rock - The Smashing Pumpkins"),
 ];
 
-pub fn known_song_name(key: u32) -> Option<&'static str> {
+fn known_song_name(key: u32) -> Option<&'static str> {
     KNOWN_SONGS
         .iter()
         .find(|(k, _)| *k == key)

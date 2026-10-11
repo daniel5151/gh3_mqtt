@@ -211,7 +211,7 @@ impl Config {
 }
 
 /// Raw deserialization schema mapping directly to `gh3_mqtt.toml`.
-pub mod schema {
+mod schema {
     use serde::Deserialize;
 
     /// Raw TOML schema for individual sensor and event toggles.

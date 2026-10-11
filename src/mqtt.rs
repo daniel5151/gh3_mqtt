@@ -77,29 +77,14 @@ impl MqttError {
     }
 }
 
-fn connack_reason(code: u8) -> &'static str {
-    match code {
-        1 => "unacceptable protocol version",
-        2 => "identifier rejected",
-        3 => "server unavailable",
-        4 => "bad user name or password",
-        5 => "not authorized",
-        _ => "unknown return code",
-    }
-}
-
 /// MQTT 3.1.1 CONNACK packet fixed and variable header.
 #[repr(C)]
 #[derive(FromBytes, IntoBytes, KnownLayout, Immutable, Clone, Copy, Debug, PartialEq)]
-pub struct ConnackPacket {
-    /// Fixed header packet type (0x20).
-    pub packet_type: u8,
-    /// Fixed header remaining length (0x02).
-    pub remaining_length: u8,
-    /// Connect acknowledge flags (session present bit 0).
-    pub session_present: u8,
-    /// Connect return code (0x00 for connection accepted).
-    pub return_code: u8,
+struct ConnackPacket {
+    packet_type: u8,
+    remaining_length: u8,
+    session_present: u8,
+    return_code: u8,
 }
 
 /// A lightweight, non-blocking MQTT 3.1.1 client.
@@ -243,7 +228,17 @@ impl MqttClient {
         if connack.return_code != 0x00 {
             return Err(MqttError::ConnectionRefused {
                 code: connack.return_code,
-                reason: connack_reason(connack.return_code),
+                reason: {
+                    let code = connack.return_code;
+                    match code {
+                        1 => "unacceptable protocol version",
+                        2 => "identifier rejected",
+                        3 => "server unavailable",
+                        4 => "bad user name or password",
+                        5 => "not authorized",
+                        _ => "unknown return code",
+                    }
+                },
             });
         }
 

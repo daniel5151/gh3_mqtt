@@ -15,6 +15,12 @@ A lightweight plugin for **Guitar Hero III (PC / BetterGH3 / GH3+)** that monito
 
 ---
 
+## 🎬 Demo
+
+https://github.com/user-attachments/assets/c7dda198-50af-4947-80f1-c5d4be6b58f6
+
+---
+
 ## ⚡ Features
 
 - **Live Star Power Tracking**:
